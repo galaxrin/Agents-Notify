@@ -23,6 +23,12 @@ class PendingEntry:
 
 
 @dataclass
+class AutoReviewState:
+    active: bool = False
+    key: str | None = None
+
+
+@dataclass
 class ProcessContext:
     seen: SeenKeys
     send: Callable[[Notification], bool]
@@ -31,6 +37,7 @@ class ProcessContext:
     now: float = 0.0
     approval_delay: float = 10.0
     agent_name: str | None = None
+    review: AutoReviewState = field(default_factory=AutoReviewState)
 
 
 class SeenKeys:
@@ -83,6 +90,8 @@ def process_line(line: str, ctx: ProcessContext) -> bool:
         return False
     if notification.key.startswith("approval:"):
         ctx.pending.setdefault(notification.key, PendingEntry(ctx.now, notification))
+        if ctx.review.active and ctx.review.key is None:
+            ctx.review.key = notification.key
         return False
     if ctx.messages_path is not None:
         notification = customize(notification,
@@ -99,6 +108,8 @@ def process_line(line: str, ctx: ProcessContext) -> bool:
 
 
 def flush_pending(ctx: ProcessContext) -> int:
+    if ctx.review.active:
+        return 0
     sent_count = 0
     for key, entry in list(ctx.pending.items()):
         if ctx.now - entry.started < ctx.approval_delay:
@@ -127,28 +138,59 @@ def _scan_paths(sessions_dir: Path) -> list[Path]:
         return []
 
 
-def _is_subagent_meta(line: bytes) -> bool:
+def _session_type(line: bytes) -> str:
     try:
         record = json.loads(line)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return False
+        return "user"
     if not isinstance(record, dict) or record.get("type") != "session_meta":
-        return False
+        return "user"
     payload = record.get("payload")
-    return (isinstance(payload, dict)
-            and (payload.get("thread_source") == "subagent"
-                 or isinstance(payload.get("parent_thread_id"), str)))
+    if not isinstance(payload, dict):
+        return "user"
+    source = payload.get("source")
+    if (isinstance(source, dict)
+            and source.get("subagent") == {"other": "guardian"}):
+        return "guardian"
+    if (payload.get("thread_source") == "subagent"
+            or isinstance(payload.get("parent_thread_id"), str)):
+        return "subagent"
+    return "user"
 
 
-def _read_file_state(path: Path) -> tuple[int, int, int, int, bytes, bool] | None:
+def process_guardian_line(line: str, ctx: ProcessContext) -> None:
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        return
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return
+    if record.get("type") == "response_item" and payload.get("type") == "message":
+        content = payload.get("content")
+        if (payload.get("role") == "user" and isinstance(content, list)
+                and any(isinstance(item, dict)
+                        and ">>> APPROVAL REQUEST START" in item.get("text", "")
+                        for item in content)):
+            ctx.review.active = True
+            ctx.review.key = next(reversed(ctx.pending), None)
+    elif record.get("type") == "event_msg" and payload.get("type") == "task_complete":
+        if ctx.review.active:
+            if ctx.review.key is not None:
+                ctx.pending.pop(ctx.review.key, None)
+            ctx.review.active = False
+            ctx.review.key = None
+
+
+def _read_file_state(path: Path) -> tuple[int, int, int, int, bytes, str] | None:
     try:
         with path.open("rb") as handle:
             stat = os.fstat(handle.fileno())
-            is_subagent = _is_subagent_meta(handle.readline())
+            session_type = _session_type(handle.readline())
             offset = last_complete_offset(handle)
             handle.seek(0)
             return (stat.st_dev, stat.st_ino, offset,
-                    stat.st_size, handle.read(256), is_subagent)
+                    stat.st_size, handle.read(256), session_type)
     except Exception as error:
         logging.warning("session stat failed for %s: %s", path, error)
         return None
@@ -164,21 +206,23 @@ def _process_file(path: Path, states: dict, ctx: ProcessContext) -> None:
             truncated = previous is not None and stat.st_size < previous[3]
             rewritten = previous is not None and prefix[:len(previous[4])] != previous[4]
             start = 0 if previous is None or replaced or truncated or rewritten else previous[2]
-            is_subagent = False if start == 0 else previous[5]
+            session_type = "user" if start == 0 else previous[5]
             handle.seek(start)
             offset = start
             while line := handle.readline():
                 if not line.endswith(b"\n"):
                     break
                 if offset == 0:
-                    is_subagent = _is_subagent_meta(line)
-                if not is_subagent:
+                    session_type = _session_type(line)
+                if session_type == "guardian":
+                    process_guardian_line(line.decode("utf-8", errors="replace"), ctx)
+                elif session_type == "user":
                     ctx.now = time.monotonic()
                     process_line(line.decode("utf-8", errors="replace"), ctx)
                 offset = handle.tell()
             size = os.fstat(handle.fileno()).st_size
             states[path] = (stat.st_dev, stat.st_ino,
-                            0 if offset > size else offset, size, prefix, is_subagent)
+                            0 if offset > size else offset, size, prefix, session_type)
     except Exception as error:
         logging.warning("session read failed for %s: %s", path, error)
 
@@ -201,14 +245,16 @@ def watch(sessions_dirs: list[Path], seen: SeenKeys,
                 states[path] = state
     # Shared pending dict so approval entries survive across loop iterations
     shared_pending: dict[str, PendingEntry] = {}
+    review = AutoReviewState()
     flush_ctx = ProcessContext(seen=seen, send=send, messages_path=messages_path,
-                              approval_delay=approval_delay, pending=shared_pending)
+                              approval_delay=approval_delay, pending=shared_pending,
+                              review=review)
     while True:
         for sessions_dir in sessions_dirs:
             agent = dir_agents.get(sessions_dir)
             ctx = ProcessContext(seen=seen, send=send, messages_path=messages_path,
                                 approval_delay=approval_delay, agent_name=agent,
-                                pending=shared_pending)
+                                pending=shared_pending, review=review)
             for path in _scan_paths(sessions_dir):
                 _process_file(path, states, ctx)
         flush_ctx.now = time.monotonic()

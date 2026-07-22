@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from urllib.error import URLError
 from unittest.mock import patch
 
+import agent_watch_notify.watcher as watcher_module
 from agent_watch_notify.__main__ import main
 from agent_watch_notify.events import Notification, guess_agent_name, parse_event
 from agent_watch_notify.notifier import (
@@ -508,7 +509,60 @@ class EventsTest(unittest.TestCase):
             ctx = ProcessContext(seen=seen, send=lambda item: sent.append(item) or True)
             self.assertTrue(process_line(line, ctx))
             self.assertFalse(process_line(line, ctx))
-            self.assertEqual(len(sent), 1)
+        self.assertEqual(len(sent), 1)
+
+    def test_guardian_auto_review_suppresses_approval_notification(self):
+        with TemporaryDirectory() as directory:
+            sent = []
+            review = watcher_module.AutoReviewState()
+            ctx = ProcessContext(
+                seen=SeenKeys(Path(directory) / "seen.json"),
+                send=lambda item: sent.append(item) or True,
+                pending={},
+                review=review,
+                now=0,
+                approval_delay=10,
+            )
+            request = json.dumps({
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call",
+                    "call_id": "auto-reviewed",
+                    "input": json.dumps({"sandbox_permissions": "require_escalated"}),
+                },
+            })
+            self.assertFalse(process_line(request, ctx))
+            watcher_module.process_guardian_line(json.dumps({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": ">>> APPROVAL REQUEST START"}],
+                },
+            }), ctx)
+
+            ctx.now = 11
+            self.assertEqual(flush_pending(ctx), 0)
+            watcher_module.process_guardian_line(json.dumps({
+                "type": "event_msg",
+                "payload": {
+                    "type": "task_complete",
+                    "last_agent_message": json.dumps({"outcome": "allow"}),
+                },
+            }), ctx)
+            self.assertEqual(ctx.pending, {})
+            self.assertEqual(sent, [])
+
+    def test_guardian_session_is_control_stream(self):
+        meta = json.dumps({
+            "type": "session_meta",
+            "payload": {
+                "thread_source": "subagent",
+                "source": {"subagent": {"other": "guardian"}},
+                "parent_thread_id": "parent-1",
+            },
+        }).encode()
+        self.assertEqual(watcher_module._session_type(meta), "guardian")
 
     def test_process_line_ignores_invalid_json(self):
         with TemporaryDirectory() as directory:
