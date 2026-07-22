@@ -1,13 +1,16 @@
 import json
+import io
 import os
 import stat
 import subprocess
+import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from agent_watch_notify import installer
+from agent_watch_notify.config_server import _Handler
 
 
 class InstallerTest(unittest.TestCase):
@@ -21,6 +24,14 @@ class InstallerTest(unittest.TestCase):
             messages.write_text('{"complete_title":"我的文案"}')
             installer._install_message_files()
             self.assertEqual(messages.read_text(), '{"complete_title":"我的文案"}')
+
+    def test_packaged_installer_creates_default_agent_messages(self):
+        with TemporaryDirectory() as directory, \
+                patch.object(installer, "_config_dir", return_value=Path(directory)), \
+                patch.object(installer, "_find_scripts_dir", return_value=None):
+            installer._install_message_files()
+            self.assertTrue((Path(directory) / "messages.codex.json").exists())
+            self.assertTrue((Path(directory) / "messages.zcode.json").exists())
 
     def test_write_env_keeps_legacy_names_and_private_permissions(self):
         with TemporaryDirectory() as directory, \
@@ -62,6 +73,27 @@ class BootstrapTest(unittest.TestCase):
         script = (root / "scripts/bootstrap.ps1").read_text()
         self.assertIn("-m pip install --user --upgrade", script)
         self.assertIn("-m agent_watch_notify --install", script)
+
+
+class ConfigServerTest(unittest.TestCase):
+    def test_server_stops_after_config_is_saved(self):
+        with TemporaryDirectory() as directory:
+            _Handler.config_dir = Path(directory)
+            stopped = threading.Event()
+
+            class Server:
+                def shutdown(self):
+                    stopped.set()
+
+            body = b'{"env":{},"agents":{}}'
+            handler = object.__new__(_Handler)
+            handler.path = "/api/config"
+            handler.headers = {"Content-Length": str(len(body))}
+            handler.rfile = io.BytesIO(body)
+            handler.server = Server()
+            handler._json_response = lambda *_args, **_kwargs: None
+            handler.do_POST()
+            self.assertTrue(stopped.wait(0.2))
 
 
 if __name__ == "__main__":

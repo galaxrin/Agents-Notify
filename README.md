@@ -54,7 +54,7 @@ Windows PowerShell：
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/galaxrin/Agents-Notify/main/scripts/bootstrap.ps1)))
 ```
 
-脚本会从 GitHub 安装最新版，然后进入 ntfy 配置并注册开机自启，不需要 Git 或克隆仓库。
+脚本会从 GitHub 安装最新版、注册开机自启并自动打开 Web 配置，不需要 Git 或克隆仓库。保存配置后页面服务自动退出，后台通知继续运行。
 
 ### 手动安装
 
@@ -102,7 +102,7 @@ agent-watch-notify --config
 - 审批宽限期和轮询间隔
 - 测试通知、恢复默认
 
-保存后立即生效，无需重启服务。仅本机可访问，不暴露到局域网。
+保存后立即生效，无需重启服务，配置页面服务会自动退出。仅本机可访问，不暴露到局域网。
 
 ## 测试通知
 

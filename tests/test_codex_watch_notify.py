@@ -723,6 +723,19 @@ class EventsTest(unittest.TestCase):
             self.assertEqual(main(), 0)
         run_server.assert_called_once()
 
+    def test_main_install_opens_config_server(self):
+        from agent_watch_notify import config_server, installer
+
+        with TemporaryDirectory() as directory, \
+                patch("sys.argv", ["agent-watch-notify", "--install"]), \
+                patch("builtins.input", side_effect=["topic", "token"]), \
+                patch("agent_watch_notify.__main__.Path.home", return_value=Path(directory)), \
+                patch.object(installer, "do_install") as do_install, \
+                patch.object(config_server, "run_server") as run_server:
+            self.assertEqual(main(), 0)
+        do_install.assert_called_once_with("topic", "token")
+        run_server.assert_called_once_with(Path(directory) / ".config" / "agent-watch-notify")
+
     def test_main_backward_compat_env_vars(self):
         with TemporaryDirectory() as directory:
             with patch.dict(os.environ, {"CODEX_WATCH_NTFY_URL": "https://example.invalid/topic"}, clear=True), \

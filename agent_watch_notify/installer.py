@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 from agent_watch_notify._config import read_env_file, write_env_file
+from agent_watch_notify.notifier import DEFAULT_MESSAGES
 
 _LABEL = "com.agent.watch-notify"
 _TASK_NAME = "agent-watch-notify"
@@ -65,8 +66,18 @@ def _install_message_files() -> None:
     if scripts is None:
         # pip install: write built-in defaults
         if not dest.exists():
-            from agent_watch_notify.notifier import DEFAULT_MESSAGES
             dest.write_text(json.dumps(DEFAULT_MESSAGES, ensure_ascii=False, indent=2) + "\n")
+        for name, display_name in (("codex", "Codex"), ("zcode", "ZCode")):
+            agent_dest = _config_dir() / f"messages.{name}.json"
+            if agent_dest.exists():
+                continue
+            messages = DEFAULT_MESSAGES | {
+                "complete_title": f"{display_name} · 已完成",
+                "complete_body": f"{display_name} 任务已结束",
+                "approval_title": f"{display_name} · 等待审核",
+                "approval_body": f"请回到 {display_name} 处理",
+            }
+            agent_dest.write_text(json.dumps(messages, ensure_ascii=False, indent=2) + "\n")
         return
     # Repo checkout: copy all message files
     if not dest.exists():

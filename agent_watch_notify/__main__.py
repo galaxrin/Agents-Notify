@@ -117,6 +117,8 @@ def main() -> int:
             print(f"已生成主题: {url}")
         token = input("ntfy 令牌 (无认证可回车跳过): ").strip()
         do_install(url, token)
+        from agent_watch_notify.config_server import run_server
+        run_server(config_dir)
         return 0
 
     if args.uninstall:

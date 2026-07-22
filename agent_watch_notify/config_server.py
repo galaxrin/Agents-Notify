@@ -8,6 +8,7 @@ import re
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from threading import Thread
 
 from agent_watch_notify._config import read_env_file, write_env_file
 from agent_watch_notify.notifier import DEFAULT_MESSAGES
@@ -153,6 +154,7 @@ class _Handler(BaseHTTPRequestHandler):
                 self._write_messages_file(self.config_dir / ("messages." + agent_name + ".json"), agent_info.get("messages", {}))
             self._write_env(env)
             self._json_response({"ok": True, "agents": self._discover_agents()})
+            Thread(target=self.server.shutdown, daemon=True).start()
         elif self.path == "/api/test":
             env = self._read_env()
             agent_name = data.get("agent", "")
