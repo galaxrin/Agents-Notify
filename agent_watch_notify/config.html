@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agents Notify</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f5f7;color:#1d1d1f;padding:20px;max-width:700px;margin:0 auto}
+h1{font-size:20px;margin-bottom:20px}
+.card{border:1px solid #d2d2d7;border-radius:12px;padding:16px;margin-bottom:16px;background:#fff}
+.card h2{font-size:14px;color:#6e6e73;margin-bottom:12px}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:#8e8e93;margin-bottom:3px}
+.field input,.field select{width:100%;padding:7px 10px;border:1px solid #d2d2d7;border-radius:7px;font-size:13px}
+.field select{appearance:auto}
+.row2{display:flex;gap:10px}.row2 .field{flex:1}
+.tabs{display:flex;gap:3px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
+.tab{padding:6px 14px;border:1px solid #d2d2d7;border-radius:7px 7px 0 0;cursor:pointer;font-size:12px;background:#e5e5ea;color:#6e6e73}
+.tab.active{background:#fff;color:#1d1d1f;border-bottom-color:#fff;font-weight:600}
+.panel{display:none}.panel.active{display:block}
+button{padding:8px 18px;border:none;border-radius:7px;font-size:13px;cursor:pointer;font-weight:500}
+.btn-p{background:#007aff;color:#fff}
+.btn-s{background:#e5e5ea;color:#1d1d1f}
+.btn-d{background:#ff3b30;color:#fff}
+.btn-add{padding:5px 12px;font-size:12px;background:#34c759;color:#fff;border-radius:7px}
+.btn-del{padding:5px 12px;font-size:12px;background:#ff3b30;color:#fff;border-radius:7px;margin-left:auto}
+.btn-test{padding:5px 12px;font-size:12px;background:#007aff;color:#fff;border-radius:7px}
+.add-row{display:flex;gap:6px;align-items:center;margin-bottom:12px}
+.add-row input{width:140px;padding:5px 8px;border:1px solid #d2d2d7;border-radius:7px;font-size:12px}
+.panel-header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.panel-header h3{font-size:14px;color:#1d1d1f}
+.dir-box{background:#f5f5f7;border:1px solid #e5e5ea;border-radius:7px;padding:8px 10px;margin-bottom:12px;font-size:11px;color:#6e6e73;word-break:break-all}
+.dir-box b{color:#1d1d1f}
+.toast{position:fixed;top:16px;right:16px;padding:10px 18px;border-radius:7px;font-size:13px;color:#fff;opacity:0;transition:opacity .3s;z-index:99}
+.toast.ok{background:#34c759}.toast.err{background:#ff3b30}.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<h1>&#9881;&#65039; Agents Notify</h1>
+<div id="toast" class="toast"></div>
+<div class="card">
+<h2>ntfy 连接</h2>
+<div class="field"><label>主题地址 *</label><input id="f_url" placeholder="AgentsNotify-随机码"></div>
+<div class="field"><label>认证令牌（可选）</label><input id="f_token" placeholder="tk_xxx"></div>
+<div class="row2">
+<div class="field"><label>审批宽限期（秒）</label><input id="f_delay" type="number" min="0" step="0.5" value="10"></div>
+<div class="field"><label>轮询间隔（秒）</label><input id="f_interval" type="number" min="0.5" step="0.5" value="1"></div>
+</div>
+</div>
+<div class="card">
+<h2>通知文案（按 Agent）</h2>
+<div class="tabs" id="tabs"></div>
+<div class="add-row">
+<input id="newAgent" placeholder="Agent 名称（如 cursor）">
+<button class="btn-add" id="btnAdd">+ 添加 Agent</button>
+</div>
+<div id="panels"></div>
+</div>
+<script>
+var agents={};
+var presets={"codex":{"complete_title":"Codex · 已完成","complete_body":"Codex 任务已结束","approval_title":"Codex · 等待审核","approval_body":"请回到 Codex 处理"},"zcode":{"complete_title":"ZCode · 已完成","complete_body":"ZCode 任务已结束","approval_title":"ZCode · 等待审核","approval_body":"请回到 ZCode 处理"}};
+
+function toast(m,ok){var t=document.getElementById("toast");t.textContent=m;t.className="toast "+(ok!==false?"ok":"err")+" show";setTimeout(function(){t.className="toast"},2500)}
+function api(method,url,body){return fetch(url,{method:method,headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined}).then(function(r){return r.json()})}
+
+function fh(key,val){
+  var labels={display_name:"显示名称",complete_title:"完成标题",complete_body:"完成正文",complete_tags:"完成标签",approval_title:"审批标题",approval_body:"审批正文",approval_tags:"审批标签"};
+  var lb=labels[key]||key;
+  return '<div class="field"><label>'+lb+'</label><input data-k="'+key+'" value="'+(val||"").replace(/"/g,"")+'"></div>'}
+
+function render(){
+  var names=Object.keys(agents);
+  var td=document.getElementById("tabs");
+  var pd=document.getElementById("panels");
+  var th="";
+  for(var i=0;i<names.length;i++){
+    th+='<div class="tab'+(i===0?' active':'')+'" data-name="'+names[i]+'">'+names[i]+'</div>'}
+  td.innerHTML=th;
+  var ph="";
+  for(var i=0;i<names.length;i++){
+    var n=names[i];var a=agents[n];var m=a.messages||{};
+    var dirs=a.dirs||[];
+    ph+='<div class="panel'+(i===0?' active':'')+'" data-name="'+n+'">';
+    ph+='<div class="panel-header"><h3>'+n+'</h3>';
+    ph+='<button class="btn-test" data-test="'+n+'" data-type="complete">测试完成</button>';
+    ph+='<button class="btn-test" data-test="'+n+'" data-type="approval">测试审批</button>';
+    ph+='<button class="btn-s" style="padding:5px 12px;font-size:12px;border-radius:7px" data-reset="'+n+'">恢复默认</button>';
+    ph+='<button class="btn-del" data-del="'+n+'">删除</button></div>';
+    if(dirs.length>0){ph+='<div class="dir-box"><b>监听目录：</b>'+dirs.join("<br>")+'</div>'}
+    else{ph+='<div class="dir-box">未检测到目录，请确认 Agent 已安装</div>'}
+    ph+=fh("display_name",m.display_name||"");
+    ph+=fh("complete_title",m.complete_title||"");
+    ph+=fh("complete_body",m.complete_body||"");
+    ph+=fh("complete_tags",m.complete_tags||"");
+    ph+='<div style="height:10px"></div>';
+    ph+=fh("approval_title",m.approval_title||"");
+    ph+=fh("approval_body",m.approval_body||"");
+    ph+=fh("approval_tags",m.approval_tags||"");
+    ph+='</div>'}
+  pd.innerHTML=ph;
+  bindAll();
+  bindAutoSave()}
+
+function bindAll(){
+  document.querySelectorAll(".tab").forEach(function(tab){
+    tab.addEventListener("click",function(){
+      var name=this.getAttribute("data-name");
+      document.querySelectorAll(".tab").forEach(function(t){t.className="tab"});
+      document.querySelectorAll(".panel").forEach(function(p){p.className="panel"});
+      this.className="tab active";
+      document.querySelector('.panel[data-name="'+name+'"]').className="panel active"})});
+  document.querySelectorAll("[data-test]").forEach(function(btn){
+    btn.addEventListener("click",function(){
+      var name=this.getAttribute("data-test");
+      var ntype=this.getAttribute("data-type")||"complete";
+      var panel=document.querySelector('.panel[data-name="'+name+'"]');
+      if(!panel){toast("未找到面板",false);return}
+      var msgs=collect(panel);
+      api("POST","/api/test",{agent:name,messages:msgs,type:ntype}).then(function(r){
+        toast(r.ok?name+" 通知已发送":"失败: "+(r.error||""),r.ok)})})});
+  document.querySelectorAll("[data-reset]").forEach(function(btn){
+    btn.addEventListener("click",function(){
+      var name=this.getAttribute("data-reset");
+      if(!confirm("将 "+name+" 的文案恢复为默认值？"))return;
+      var preset=presets[name]||{};
+      var defaults={display_name:"",complete_title:"",complete_body:"",approval_title:"",approval_body:"",complete_tags:"white_check_mark",approval_tags:"warning"};
+      var msgs={};
+      for(var k in defaults){msgs[k]=preset[k]||defaults[k]}
+      var panel=document.querySelector('.panel[data-name="'+name+'"]');
+      if(!panel)return;
+      panel.querySelectorAll("[data-k]").forEach(function(el){
+        var key=el.getAttribute("data-k");
+        if(msgs[key]!==undefined)el.value=msgs[key]});
+      autoSave();
+      toast(name+" 已恢复默认")})});
+  document.querySelectorAll("[data-del]").forEach(function(btn){
+    btn.addEventListener("click",function(){
+      var name=this.getAttribute("data-del");
+      if(!confirm("删除 "+name+" 的文案配置？"))return;
+      api("POST","/api/delete",{agent:name}).then(function(r){
+        if(r.ok){toast("已删除 "+name);load()}else toast("失败",false)})})})}
+
+function collect(panel){
+  var msgs={};
+  panel.querySelectorAll("[data-k]").forEach(function(el){
+    msgs[el.getAttribute("data-k")]=el.value});
+  return msgs}
+
+function load(){
+  api("GET","/api/config").then(function(d){
+    document.getElementById("f_url").value=d.env.url||"";
+    document.getElementById("f_token").value=d.env.token||"";
+    document.getElementById("f_delay").value=d.env.delay||"10";
+    document.getElementById("f_interval").value=d.env.interval||"1";
+    agents=d.agents||{};
+    render()})}
+
+var _saveTimer=null;
+function autoSave(){
+  clearTimeout(_saveTimer);
+  _saveTimer=setTimeout(function(){
+    var env={url:document.getElementById("f_url").value,token:document.getElementById("f_token").value,sessions:"",delay:document.getElementById("f_delay").value,interval:document.getElementById("f_interval").value};
+    var a={};
+    document.querySelectorAll(".panel").forEach(function(panel){
+      var name=panel.getAttribute("data-name");
+      a[name]={messages:collect(panel)}});
+    api("POST","/api/config",{env:env,agents:a}).then(function(r){
+      if(r.ok){agents=r.agents||agents}
+      else toast("保存失败: "+(r.error||""),false)})},500)}
+
+function bindAutoSave(){
+  document.querySelectorAll(".card input,.card select").forEach(function(el){
+    el.removeEventListener("input",autoSave);
+    el.addEventListener("input",autoSave)})}
+
+document.getElementById("btnAdd").addEventListener("click",function(){
+  var name=document.getElementById("newAgent").value.trim().toLowerCase().replace(/[^a-z0-9_-]/g,"");
+  if(!name){toast("请输入名称",false);return}
+  if(agents[name]){toast("已存在",false);return}
+  var preset=presets[name]||{};
+  var msgs={};
+  ["display_name","complete_title","complete_body","approval_title","approval_body","complete_tags","approval_tags"].forEach(function(k){msgs[k]=preset[k]||""});
+  agents[name]={messages:msgs,dirs:[]};
+  document.getElementById("newAgent").value="";
+  render();
+  toast("已添加 "+name)});
+
+load();
+</script>
+</body>
+</html>
