@@ -3,13 +3,12 @@ from __future__ import annotations
 
 import argparse
 import os
-from glob import glob
 from pathlib import Path
 
 from agent_watch_notify._config import read_env_file
-from agent_watch_notify.events import Notification
+from agent_watch_notify.events import Notification, guess_agent_name
 from agent_watch_notify.notifier import DEFAULT_MESSAGES, customize, load_messages, publish
-from agent_watch_notify.watcher import SeenKeys, watch
+from agent_watch_notify.watcher import SeenKeys, discover_session_dirs as _discover_session_dirs, watch
 
 _CONFIG_DIR_NAME = "agent-watch-notify"
 _STATE_DIR_NAME = "agent-watch-notify"
@@ -26,54 +25,16 @@ def _env(key: str, fallback_key: str | None = None, default: str | None = None) 
     return default
 
 
-_HARDCODED_SESSION_DIRS = [
-    Path.home() / ".codex/sessions",
-    Path.home() / ".zcode/sessions",
-    Path.home() / ".zcode/cli/agents",
-    Path.home() / ".zcode/cli/rollout",
-]
-
-# Glob patterns for auto-discovering agent session directories.
-# Unix/macOS: ~/.*/sessions, ~/.*/cli/agents, ~/.*/cli/rollout
-# Windows:    %APPDATA%/*\sessions, etc.
-_DISCOVERY_PATTERNS = [
-    str(Path.home() / ".*" / "sessions"),
-    str(Path.home() / ".*" / "cli" / "agents"),
-    str(Path.home() / ".*" / "cli" / "rollout"),
-]
-_appdata = os.environ.get("APPDATA")
-if _appdata:
-    _DISCOVERY_PATTERNS += [
-        str(Path(_appdata) / "*" / "sessions"),
-        str(Path(_appdata) / "*" / "cli" / "agents"),
-        str(Path(_appdata) / "*" / "cli" / "rollout"),
-    ]
-
-
-def _discover_session_dirs() -> list[Path]:
-    """Auto-discover agent session directories by scanning common patterns."""
-    found: set[Path] = set()
-    for pattern in _DISCOVERY_PATTERNS:
-        for match in glob(pattern):
-            path = Path(match)
-            if path.is_dir():
-                found.add(path)
-    for path in _HARDCODED_SESSION_DIRS:
-        if path.is_dir():
-            found.add(path)
-    return sorted(found)
-
-
-def _parse_session_dirs(raw: str | None) -> list[Path]:
+def _parse_session_dirs(raw: str | None, ignored: set[str] | None = None) -> list[Path]:
+    found = set(_discover_session_dirs())
     if raw:
-        dirs = []
         for part in raw.split(","):
             stripped = part.strip()
             if stripped:
-                dirs.append(Path(stripped).expanduser())
-        if dirs:
-            return dirs
-    return _discover_session_dirs() or [_HARDCODED_SESSION_DIRS[0]]
+                found.add(Path(stripped).expanduser())
+    if not found:
+        found.add(Path.home() / ".codex/sessions")
+    return [path for path in sorted(found) if guess_agent_name(path) not in (ignored or set())]
 
 
 def _send_factory(config_dir: Path, messages_path: Path | None):
@@ -84,6 +45,9 @@ def _send_factory(config_dir: Path, messages_path: Path | None):
         env = read_env_file(env_path)
         topic_url = env.get("AGENT_WATCH_NTFY_URL") or env.get("CODEX_WATCH_NTFY_URL", "")
         token = env.get("AGENT_WATCH_NTFY_TOKEN") or env.get("CODEX_WATCH_NTFY_TOKEN") or None
+        ignored = {name.strip() for name in env.get("AGENT_WATCH_IGNORED_AGENTS", "").split(",") if name.strip()}
+        if notification.agent_name in ignored:
+            return True
         messages = load_messages(messages_path) if messages_path else None
         if not topic_url:
             return False
@@ -141,15 +105,20 @@ def main() -> int:
     if not topic_url:
         parser.error("AGENT_WATCH_NTFY_URL is required: set env var or run --install first")
     if args.test:
+        messages = load_messages(messages_path)
         notification = customize(
             Notification("manual", DEFAULT_MESSAGES["complete_title"],
                          DEFAULT_MESSAGES["complete_body"]),
-            load_messages(messages_path),
+            messages,
         )
-        return 0 if publish(notification, topic_url, token,
-                            messages=load_messages(messages_path)) else 1
-    sessions_raw = env_file.get("AGENT_WATCH_SESSIONS_DIR") or env_file.get("CODEX_SESSIONS_DIR") or ""
-    sessions_dirs = _parse_session_dirs(sessions_raw)
+        return 0 if publish(notification, topic_url, token, messages=messages) else 1
+    def current_session_dirs():
+        current = read_env_file(config_dir / "env")
+        sessions_raw = current.get("AGENT_WATCH_SESSIONS_DIR") or current.get("CODEX_SESSIONS_DIR") or ""
+        ignored = {name.strip() for name in current.get("AGENT_WATCH_IGNORED_AGENTS", "").split(",") if name.strip()}
+        return _parse_session_dirs(sessions_raw, ignored)
+
+    sessions_dirs = current_session_dirs()
     seen = SeenKeys(Path.home() / ".local" / "state" / _STATE_DIR_NAME / "seen.json")
     try:
         approval_delay = float(env_file.get("AGENT_WATCH_APPROVAL_DELAY") or env_file.get("CODEX_WATCH_APPROVAL_DELAY") or "10")
@@ -163,7 +132,8 @@ def main() -> int:
         poll_interval = 0.5
     send = _send_factory(config_dir, messages_path)
     watch(sessions_dirs, seen, send, interval=poll_interval,
-          messages_path=messages_path, approval_delay=approval_delay)
+          messages_path=messages_path, approval_delay=approval_delay,
+          discover=current_session_dirs)
     return 0
 
 

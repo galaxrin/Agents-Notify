@@ -7,7 +7,7 @@ from urllib.error import URLError
 from unittest.mock import patch
 
 import agent_watch_notify.watcher as watcher_module
-from agent_watch_notify.__main__ import main
+from agent_watch_notify.__main__ import _parse_session_dirs, main
 from agent_watch_notify.events import Notification, guess_agent_name, parse_event
 from agent_watch_notify.notifier import (
     DEFAULT_MESSAGES,
@@ -27,6 +27,39 @@ from agent_watch_notify._offset import last_complete_offset
 
 
 class EventsTest(unittest.TestCase):
+    def test_seen_keys_keeps_constant_time_index_in_sync(self):
+        with TemporaryDirectory() as directory:
+            seen = SeenKeys(Path(directory) / "seen.json", limit=2)
+
+            seen.add("first")
+            seen.add("second")
+            seen.add("third")
+
+            self.assertEqual(seen.keys, {"second", "third"})
+            self.assertTrue(seen.contains("second"))
+            self.assertFalse(seen.contains("first"))
+
+    def test_discovers_windows_roaming_and_local_appdata(self):
+        with TemporaryDirectory() as home, TemporaryDirectory() as roaming, TemporaryDirectory() as local:
+            roaming_sessions = Path(roaming) / "claude" / "sessions"
+            local_sessions = Path(local) / "cursor" / "sessions"
+            roaming_sessions.mkdir(parents=True)
+            local_sessions.mkdir(parents=True)
+            found = watcher_module.discover_session_dirs(Path(home), roaming, local)
+            self.assertEqual(found, sorted([roaming_sessions, local_sessions]))
+
+    def test_configured_session_dirs_do_not_disable_discovery(self):
+        old = Path.home() / ".old-agent" / "sessions"
+        new = Path.home() / ".new-agent" / "sessions"
+        with patch("agent_watch_notify.__main__._discover_session_dirs", return_value=[new]):
+            self.assertEqual(_parse_session_dirs(str(old)), sorted([old, new]))
+
+    def test_ignored_agent_is_removed_from_auto_discovery(self):
+        codex = Path.home() / ".codex" / "sessions"
+        claude = Path.home() / ".claude" / "sessions"
+        with patch("agent_watch_notify.__main__._discover_session_dirs", return_value=[codex, claude]):
+            self.assertEqual(_parse_session_dirs("", {"codex"}), [claude])
+
     def test_approval_waits_for_grace_period(self):
         def request(call_id):
             return json.dumps({
@@ -110,6 +143,56 @@ class EventsTest(unittest.TestCase):
             self.assertEqual(flush_pending(ctx), 1)
             self.assertEqual(sent[0].key, "approval:fast")
 
+    def test_plan_mode_completion_waits_for_approval_notification(self):
+        with TemporaryDirectory() as directory:
+            sent = []
+            ctx = ProcessContext(
+                seen=SeenKeys(Path(directory) / "seen.json"),
+                send=lambda item: sent.append(item) or True,
+                pending={},
+                now=0,
+                approval_delay=10,
+                agent_name="codex",
+            )
+            settings = json.dumps({
+                "type": "turn_context",
+                "payload": {"collaboration_mode": {"mode": "plan"}},
+            })
+            complete = json.dumps({
+                "type": "event_msg",
+                "payload": {"type": "task_complete", "turn_id": "plan-turn"},
+            })
+
+            self.assertFalse(process_line(settings, ctx))
+            self.assertFalse(process_line(complete, ctx))
+            self.assertEqual(list(ctx.pending), ["approval:plan-turn"])
+            ctx.now = 10
+            self.assertEqual(flush_pending(ctx), 1)
+            self.assertEqual([item.key for item in sent], ["approval:plan-turn"])
+
+    def test_plan_mode_zcode_turn_complete_waits_for_approval_notification(self):
+        with TemporaryDirectory() as directory:
+            ctx = ProcessContext(
+                seen=SeenKeys(Path(directory) / "seen.json"),
+                send=lambda _item: True,
+                pending={},
+                now=0,
+                agent_name="zcode",
+            )
+            process_line(json.dumps({
+                "type": "event_msg",
+                "payload": {
+                    "type": "thread_settings_applied",
+                    "thread_settings": {"collaboration_mode": {"mode": "plan"}},
+                },
+            }), ctx)
+
+            self.assertFalse(process_line(json.dumps({
+                "type": "turn_complete",
+                "turnId": "zcode-plan-turn",
+            }), ctx))
+            self.assertEqual(list(ctx.pending), ["approval:zcode-plan-turn"])
+
     def test_messages_reload_and_invalid_fields_fall_back(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "messages.json"
@@ -154,6 +237,12 @@ class EventsTest(unittest.TestCase):
             base = Path(directory) / "messages.json"
             base.write_text(json.dumps({"complete_title": "基础完成"}))
             self.assertEqual(load_messages(base, "noagent")["complete_title"], "基础完成")
+
+    def test_load_messages_preserves_empty_title_separator(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "messages.json"
+            path.write_text(json.dumps({"title_separator": ""}))
+            self.assertEqual(load_messages(path)["title_separator"], "")
 
     def test_process_line_applies_current_messages_before_send(self):
         with TemporaryDirectory() as directory:
@@ -459,6 +548,23 @@ class EventsTest(unittest.TestCase):
         result = customize(Notification("complete:x", "", "", agent_name="ZCode"), messages)
         self.assertEqual(result.title, "ZCode · 已完成")
 
+    def test_customize_uses_custom_title_separator(self):
+        for separator, expected in (
+            ("·", "Codex · 已完成"),
+            ("-", "Codex - 已完成"),
+            ("：", "Codex ： 已完成"),
+            ("", "Codex 已完成"),
+        ):
+            with self.subTest(separator=separator):
+                messages = {
+                    "display_name": "Codex",
+                    "title_separator": separator,
+                    "complete_title": "已完成",
+                    "complete_body": "B",
+                }
+                result = customize(Notification("complete:x", "", ""), messages)
+                self.assertEqual(result.title, expected)
+
     def test_customize_does_not_double_agent_name(self):
         messages = {"complete_title": "Codex · 已完成", "complete_body": "B",
                     "approval_title": "审核", "approval_body": "D"}
@@ -475,6 +581,8 @@ class EventsTest(unittest.TestCase):
         self.assertEqual(guess_agent_name(Path.home() / ".codex" / "sessions"), "codex")
         self.assertEqual(guess_agent_name(Path.home() / ".zcode" / "sessions"), "zcode")
         self.assertEqual(guess_agent_name(Path.home() / ".zcode" / "cli" / "agents"), "zcode")
+        self.assertEqual(guess_agent_name(Path.home() / ".claude" / "cli" / "agents"), "claude")
+        self.assertEqual(guess_agent_name(Path.home() / ".kimi-code" / "sessions"), "kimi-code")
         self.assertIsNone(guess_agent_name("not-a-path"))
 
     def test_zcode_turn_complete(self):
@@ -552,6 +660,31 @@ class EventsTest(unittest.TestCase):
             }), ctx)
             self.assertEqual(ctx.pending, {})
             self.assertEqual(sent, [])
+
+    def test_guardian_auto_review_does_not_suppress_other_approval(self):
+        with TemporaryDirectory() as directory:
+            sent = []
+            ctx = ProcessContext(
+                seen=SeenKeys(Path(directory) / "seen.json"),
+                send=lambda item: sent.append(item) or True,
+                pending={
+                    "approval:auto-reviewed": PendingEntry(
+                        0, Notification("approval:auto-reviewed", "A", "B")
+                    ),
+                    "approval:manual": PendingEntry(
+                        0, Notification("approval:manual", "A", "B")
+                    ),
+                },
+                review=watcher_module.AutoReviewState(
+                    active=True, key="approval:auto-reviewed"
+                ),
+                now=10,
+                approval_delay=10,
+            )
+
+            self.assertEqual(flush_pending(ctx), 1)
+            self.assertEqual([item.key for item in sent], ["approval:manual"])
+            self.assertEqual(list(ctx.pending), ["approval:auto-reviewed"])
 
     def test_guardian_session_is_control_stream(self):
         meta = json.dumps({
@@ -703,6 +836,34 @@ class EventsTest(unittest.TestCase):
                     watch([Sessions()], SeenKeys(Path(directory) / "seen.json"),
                           lambda item: sent.append(item) or True, interval=0)
             self.assertEqual(sent, [])
+
+    def test_watch_adds_session_directory_discovered_while_running(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            initial = root / ".initial" / "sessions"
+            late = root / ".late" / "sessions"
+            initial.mkdir(parents=True)
+            late.mkdir(parents=True)
+            transcript = late / "session.jsonl"
+            calls = 0
+
+            def discover():
+                nonlocal calls
+                calls += 1
+                if calls == 2:
+                    transcript.write_text("")
+                elif calls == 3:
+                    transcript.write_text(json.dumps({"type": "event_msg", "payload": {
+                        "type": "task_complete", "turn_id": "late-turn"}}) + "\n")
+                return [initial] if calls == 1 else [initial, late]
+
+            sent = []
+            with patch("agent_watch_notify.watcher.time.sleep", side_effect=[None, None, StopIteration]):
+                with self.assertRaises(StopIteration):
+                    watch([initial], SeenKeys(root / "seen.json"),
+                          lambda item: sent.append(item) or True,
+                          interval=0, discover=discover)
+            self.assertEqual([item.key for item in sent], ["complete:late-turn"])
 
     def test_main_test_mode_returns_publish_status(self):
         with TemporaryDirectory() as directory:

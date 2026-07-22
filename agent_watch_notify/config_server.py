@@ -5,13 +5,15 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
-from threading import Thread
 
 from agent_watch_notify._config import read_env_file, write_env_file
+from agent_watch_notify.events import guess_agent_name
 from agent_watch_notify.notifier import DEFAULT_MESSAGES
+from agent_watch_notify.watcher import discover_session_dirs
 
 _ENV_PATHS = {
     "url": "AGENT_WATCH_NTFY_URL",
@@ -25,9 +27,18 @@ _DEFAULTS = {"url": "", "token": "", "sessions": "", "delay": "10", "interval": 
 _AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]*$")
 
 
+def _safe_number(value, default, minimum):
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return str(value) if number >= minimum and number < float("inf") else default
+
+
 class _Handler(BaseHTTPRequestHandler):
     config_dir: Path
     html_path: Path
+    assets_dir: Path
 
     def log_message(self, fmt, *args):
         pass
@@ -40,34 +51,30 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _detect_agent_sessions(self, agent_name):
-        home = Path.home()
-        candidates = [
-            home / ("." + agent_name) / "sessions",
-            home / ("." + agent_name) / "cli" / "agents",
-            home / ("." + agent_name) / "cli" / "rollout",
-            home / ("." + agent_name) / "logs",
-            home / ".local" / "state" / agent_name,
-            home / ".local" / "share" / agent_name / "log",
-        ]
-        # Windows: %APPDATA%\agent-name\sessions etc.
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            appdata_path = Path(appdata)
-            candidates += [
-                appdata_path / agent_name / "sessions",
-                appdata_path / agent_name / "cli" / "agents",
-                appdata_path / agent_name / "cli" / "rollout",
-            ]
-        return [str(p) for p in candidates if p.exists()]
+    def _all_session_dirs(self):
+        return discover_session_dirs(Path.home(), os.environ.get("APPDATA"),
+                                     os.environ.get("LOCALAPPDATA"))
+
+    def _ignored_agents(self):
+        raw = read_env_file(self.config_dir / "env").get("AGENT_WATCH_IGNORED_AGENTS", "")
+        return {name.strip() for name in raw.split(",") if name.strip()}
 
     def _discover_agents(self):
         agents = {}
+        ignored = self._ignored_agents()
+        dirs_by_agent = {}
+        for path in self._all_session_dirs():
+            name = guess_agent_name(path)
+            if name and _AGENT_NAME_RE.match(name) and name not in ignored:
+                dirs_by_agent.setdefault(name, []).append(str(path))
         for p in sorted(self.config_dir.glob("messages.*.json")):
             name = p.stem.split(".", 1)[1]
-            if name and _AGENT_NAME_RE.match(name):
-                agents[name] = {"messages": self._read_messages_file(p), "dirs": self._detect_agent_sessions(name)}
-        return agents
+            if name and _AGENT_NAME_RE.match(name) and name not in ignored:
+                agents[name] = {"messages": self._read_messages_file(p), "dirs": dirs_by_agent.get(name, [])}
+        for name, dirs in dirs_by_agent.items():
+            if name not in agents:
+                agents[name] = {"messages": DEFAULT_MESSAGES.copy(), "dirs": dirs}
+        return dict(sorted(agents.items()))
 
     def _read_messages_file(self, path):
         result = DEFAULT_MESSAGES.copy()
@@ -78,7 +85,9 @@ class _Handler(BaseHTTPRequestHandler):
         if isinstance(configured, dict):
             for key in result:
                 value = configured.get(key)
-                if isinstance(value, str) and value.strip():
+                if key == "title_separator" and isinstance(value, str):
+                    result[key] = value.strip()
+                elif isinstance(value, str) and value.strip():
                     result[key] = value
         return result
 
@@ -87,18 +96,11 @@ class _Handler(BaseHTTPRequestHandler):
         cleaned = {}
         for key in DEFAULT_MESSAGES:
             value = messages.get(key, "")
-            if isinstance(value, str) and value.strip():
+            if key == "title_separator" and isinstance(value, str):
+                cleaned[key] = value.strip()
+            elif isinstance(value, str) and value.strip():
                 cleaned[key] = value
         path.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n")
-
-    def _collect_all_sessions(self):
-        all_dirs = set()
-        for p in self.config_dir.glob("messages.*.json"):
-            name = p.stem.split(".", 1)[1]
-            if name and _AGENT_NAME_RE.match(name):
-                for d in self._detect_agent_sessions(name):
-                    all_dirs.add(d)
-        return ",".join(sorted(all_dirs))
 
     def _read_env(self):
         result = _DEFAULTS.copy()
@@ -106,20 +108,25 @@ class _Handler(BaseHTTPRequestHandler):
         for short, env_key in _ENV_PATHS.items():
             if configured.get(env_key):
                 result[short] = configured[env_key]
+        if not result["url"]:
+            result["url"] = "AgentsNotify-" + secrets.token_hex(16)
+            self._write_env(result)
         return result
 
-    def _write_env(self, env):
+    def _write_env(self, env, ignored=None):
         self.config_dir.mkdir(parents=True, exist_ok=True)
         env_path = self.config_dir / "env"
         url = env.get("url", "")
         token = env.get("token", "")
-        sessions = self._collect_all_sessions()
+        if ignored is None:
+            ignored = self._ignored_agents()
         write_env_file(env_path, {
             "AGENT_WATCH_NTFY_URL": url,
             "AGENT_WATCH_NTFY_TOKEN": token,
-            "AGENT_WATCH_SESSIONS_DIR": sessions,
-            "AGENT_WATCH_APPROVAL_DELAY": env.get("delay", "10"),
-            "AGENT_WATCH_POLL_INTERVAL": env.get("interval", "1"),
+            "AGENT_WATCH_SESSIONS_DIR": "",
+            "AGENT_WATCH_IGNORED_AGENTS": ",".join(sorted(ignored)),
+            "AGENT_WATCH_APPROVAL_DELAY": _safe_number(env.get("delay"), "10", 0),
+            "AGENT_WATCH_POLL_INTERVAL": _safe_number(env.get("interval"), "1", 0.5),
             "CODEX_WATCH_NTFY_URL": url,
             "CODEX_WATCH_NTFY_TOKEN": token,
         })
@@ -134,6 +141,13 @@ class _Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         elif self.path == "/api/config":
             self._json_response({"agents": self._discover_agents(), "env": self._read_env()})
+        elif self.path == "/assets/galaxrin-agents-notify-logo.png":
+            body = (self.assets_dir / "galaxrin-agents-notify-logo.png").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             self.send_error(404)
 
@@ -145,16 +159,25 @@ class _Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._json_response({"ok": False, "error": "invalid JSON"}, 400)
             return
+        if not isinstance(data, dict):
+            self._json_response({"ok": False, "error": "invalid request"}, 400)
+            return
         if self.path == "/api/config":
             env = data.get("env", {})
             agents = data.get("agents", {})
+            if not isinstance(env, dict) or not isinstance(agents, dict):
+                self._json_response({"ok": False, "error": "invalid config"}, 400)
+                return
+            ignored = self._ignored_agents()
             for agent_name, agent_info in agents.items():
-                if not _AGENT_NAME_RE.match(agent_name):
+                if not isinstance(agent_name, str) or not _AGENT_NAME_RE.match(agent_name):
                     continue
+                if not isinstance(agent_info, dict):
+                    continue
+                ignored.discard(agent_name)
                 self._write_messages_file(self.config_dir / ("messages." + agent_name + ".json"), agent_info.get("messages", {}))
-            self._write_env(env)
+            self._write_env(env, ignored)
             self._json_response({"ok": True, "agents": self._discover_agents()})
-            Thread(target=self.server.shutdown, daemon=True).start()
         elif self.path == "/api/test":
             env = self._read_env()
             agent_name = data.get("agent", "")
@@ -192,22 +215,13 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json_response({"ok": False, "error": "invalid agent name"})
                 return
             try:
+                ignored = self._ignored_agents()
+                ignored.add(agent_name)
                 (self.config_dir / ("messages." + agent_name + ".json")).unlink(missing_ok=True)
+                self._write_env(self._read_env(), ignored)
                 self._json_response({"ok": True})
             except OSError as e:
                 self._json_response({"ok": False, "error": str(e)})
-        elif self.path == "/api/reset":
-            presets = {
-                "codex": {"complete_title": "Codex · 已完成", "complete_body": "Codex 任务已结束",
-                          "approval_title": "Codex · 等待审核", "approval_body": "请回到 Codex 处理"},
-                "zcode": {"complete_title": "ZCode · 已完成", "complete_body": "ZCode 任务已结束",
-                          "approval_title": "ZCode · 等待审核", "approval_body": "请回到 ZCode 处理"},
-            }
-            for p in self.config_dir.glob("messages.*.json"):
-                name = p.stem.split(".", 1)[1]
-                if name and _AGENT_NAME_RE.match(name):
-                    self._write_messages_file(p, presets.get(name, {}))
-            self._json_response({"ok": True})
         else:
             self.send_error(404)
 
@@ -215,6 +229,7 @@ class _Handler(BaseHTTPRequestHandler):
 def run_server(config_dir, host="127.0.0.1", port=9876):
     _Handler.config_dir = config_dir
     _Handler.html_path = Path(__file__).parent / "config.html"
+    _Handler.assets_dir = Path(__file__).parent / "assets"
     server = HTTPServer((host, port), _Handler)
     url = "http://" + host + ":" + str(port)
     print("配置页面: " + url)

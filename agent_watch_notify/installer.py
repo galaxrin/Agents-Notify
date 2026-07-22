@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import os
-import secrets
 import shutil
 import subprocess
 import sys
@@ -72,9 +71,11 @@ def _install_message_files() -> None:
             if agent_dest.exists():
                 continue
             messages = DEFAULT_MESSAGES | {
-                "complete_title": f"{display_name} · 已完成",
+                "display_name": display_name,
+                "title_separator": "·",
+                "complete_title": "已完成",
                 "complete_body": f"{display_name} 任务已结束",
-                "approval_title": f"{display_name} · 等待审核",
+                "approval_title": "等待审核",
                 "approval_body": f"请回到 {display_name} 处理",
             }
             agent_dest.write_text(json.dumps(messages, ensure_ascii=False, indent=2) + "\n")
@@ -249,14 +250,12 @@ def _write_wrapper() -> None:
     wrapper.parent.mkdir(parents=True, exist_ok=True)
 
     if sys.platform == "win32":
-        env_file = _env_path()
-        log_file = _log_path()
         content = (
             "@echo off\r\n"
-            f'for /f "usebackq tokens=1,* delims==" %%a in ("{env_file}") do (\r\n'
+            'for /f "usebackq tokens=1,* delims==" %%a in ("%USERPROFILE%\\.config\\agent-watch-notify\\env") do (\r\n'
             '    set "%%a=%%b"\r\n'
             ")\r\n"
-            f'python -m agent_watch_notify >> "{log_file}" 2>&1\r\n'
+            'python -m agent_watch_notify >> "%USERPROFILE%\\.local\\state\\agent-watch-notify\\stderr.log" 2>&1\r\n'
         )
         wrapper.write_text(content, encoding="ascii")
     else:

@@ -16,4 +16,4 @@ agent-watch-notify = "agent_watch_notify.__main__:main"
 include = ["agent_watch_notify*"]
 
 [tool.setuptools.package-data]
-agent_watch_notify = ["*.html"]
+agent_watch_notify = ["*.html", "assets/galaxrin-agents-notify-logo.png"]

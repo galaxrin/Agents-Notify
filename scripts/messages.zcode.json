@@ -1,7 +1,9 @@
 {
-  "complete_title": "ZCode · 已完成",
+  "display_name": "ZCode",
+  "title_separator": "·",
+  "complete_title": "已完成",
   "complete_body": "ZCode 任务已结束",
-  "approval_title": "ZCode · 等待审核",
+  "approval_title": "等待审核",
   "approval_body": "请回到 ZCode 处理",
   "complete_priority": "default",
   "complete_tags": "white_check_mark",

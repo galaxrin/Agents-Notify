@@ -6,66 +6,82 @@
 <title>Agents Notify</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f5f5f7;color:#1d1d1f;padding:20px;max-width:700px;margin:0 auto}
-h1{font-size:20px;margin-bottom:20px}
-.card{border:1px solid #d2d2d7;border-radius:12px;padding:16px;margin-bottom:16px;background:#fff}
-.card h2{font-size:14px;color:#6e6e73;margin-bottom:12px}
-.field{margin-bottom:12px}
-.field label{display:block;font-size:12px;color:#8e8e93;margin-bottom:3px}
-.field input,.field select{width:100%;padding:7px 10px;border:1px solid #d2d2d7;border-radius:7px;font-size:13px}
-.field select{appearance:auto}
-.row2{display:flex;gap:10px}.row2 .field{flex:1}
-.tabs{display:flex;gap:3px;margin-bottom:12px;flex-wrap:wrap;align-items:center}
-.tab{padding:6px 14px;border:1px solid #d2d2d7;border-radius:7px 7px 0 0;cursor:pointer;font-size:12px;background:#e5e5ea;color:#6e6e73}
-.tab.active{background:#fff;color:#1d1d1f;border-bottom-color:#fff;font-weight:600}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:#f4f7fb;color:#172033;min-height:100vh}
+button,input{font:inherit}
+button:focus-visible,input:focus-visible{outline:3px solid #bfdbfe;outline-offset:1px}
+.topbar{height:68px;background:#fff;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;padding:0 max(24px,calc((100vw - 1120px)/2));gap:14px}
+.logo{width:34px;height:34px;object-fit:contain}
+.brand h1{font-size:19px;line-height:1.2}.brand p{font-size:12px;color:#718096;margin-top:2px}
+.status{margin-left:auto;color:#087f5b;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:600}
+.app-shell{max-width:1120px;margin:28px auto;padding:0 20px;display:grid;grid-template-columns:260px minmax(0,1fr);gap:20px;align-items:start}
+.card{border:1px solid #e2e8f0;border-radius:12px;background:#fff;box-shadow:0 6px 18px rgba(31,41,55,.05)}
+.sidebar{padding:18px;position:sticky;top:20px}.sidebar h2,.section-title{font-size:15px;margin-bottom:14px}
+.main{display:grid;gap:16px}.service{padding:20px}.service-grid{display:grid;grid-template-columns:2fr 2fr 1fr 1fr;gap:12px}
+.field{margin-bottom:13px}.field:last-child{margin-bottom:0}
+.field label{display:block;font-size:12px;color:#526077;margin-bottom:6px;font-weight:600}
+.field input{width:100%;height:40px;padding:9px 11px;border:1px solid #d7deea;border-radius:8px;font-size:13px;color:#172033;background:#fff}
+.field input:hover{border-color:#aeb9ca}.field input:focus{border-color:#2563eb}
+.tabs{display:grid;gap:8px;margin-bottom:14px}
+.tab{position:relative;padding:11px 34px 11px 35px;border:1px solid #e2e8f0;border-radius:9px;cursor:pointer;font-size:13px;background:#fff;color:#526077;text-transform:capitalize}
+.tab:before{content:"";position:absolute;left:13px;top:50%;width:9px;height:9px;border-radius:50%;background:#94a3b8;transform:translateY(-50%)}
+.tab:after{content:"›";position:absolute;right:13px;font-size:20px;top:50%;transform:translateY(-52%)}
+.tab.active{background:#eff6ff;color:#1d4ed8;border-color:#60a5fa;font-weight:650}.tab.active:before{background:#2563eb}
 .panel{display:none}.panel.active{display:block}
-button{padding:8px 18px;border:none;border-radius:7px;font-size:13px;cursor:pointer;font-weight:500}
-.btn-p{background:#007aff;color:#fff}
-.btn-s{background:#e5e5ea;color:#1d1d1f}
-.btn-d{background:#ff3b30;color:#fff}
-.btn-add{padding:5px 12px;font-size:12px;background:#34c759;color:#fff;border-radius:7px}
-.btn-del{padding:5px 12px;font-size:12px;background:#ff3b30;color:#fff;border-radius:7px;margin-left:auto}
-.btn-test{padding:5px 12px;font-size:12px;background:#007aff;color:#fff;border-radius:7px}
-.add-row{display:flex;gap:6px;align-items:center;margin-bottom:12px}
-.add-row input{width:140px;padding:5px 8px;border:1px solid #d2d2d7;border-radius:7px;font-size:12px}
-.panel-header{display:flex;align-items:center;gap:8px;margin-bottom:12px}
-.panel-header h3{font-size:14px;color:#1d1d1f}
-.dir-box{background:#f5f5f7;border:1px solid #e5e5ea;border-radius:7px;padding:8px 10px;margin-bottom:12px;font-size:11px;color:#6e6e73;word-break:break-all}
-.dir-box b{color:#1d1d1f}
-.toast{position:fixed;top:16px;right:16px;padding:10px 18px;border-radius:7px;font-size:13px;color:#fff;opacity:0;transition:opacity .3s;z-index:99}
-.toast.ok{background:#34c759}.toast.err{background:#ff3b30}.toast.show{opacity:1}
+button{padding:9px 15px;border:1px solid transparent;border-radius:8px;font-size:12px;cursor:pointer;font-weight:600;background:#fff}
+.btn-s,.btn-test{border-color:#d7deea;color:#334155}.btn-s:hover,.btn-test:hover{background:#f8fafc}
+.btn-del{color:#b42318;border-color:#fecaca;margin-left:auto}.btn-del:hover{background:#fef2f2}
+.btn-add{width:100%;border:1px dashed #60a5fa;color:#2563eb;background:#fff}
+.add-row{display:grid;gap:8px;padding-top:14px;border-top:1px solid #edf1f6}
+.add-row input{width:100%;height:38px;padding:8px 10px;border:1px solid #d7deea;border-radius:8px;font-size:12px}
+.template-card{overflow:hidden}.panel-content{padding:20px}.panel-header{display:flex;align-items:center;gap:8px;margin-bottom:16px}
+.panel-header h3{font-size:17px;text-transform:capitalize;margin-right:auto}.template-section{border-top:1px solid #edf1f6;padding-top:17px;margin-top:17px}
+.template-section h4{font-size:14px;margin-bottom:12px}.template-grid{display:grid;grid-template-columns:1fr 1.6fr;gap:12px}
+.dir-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:9px;padding:11px 13px;margin-bottom:16px;font-size:11px;color:#64748b;word-break:break-all}
+.dir-box b{color:#334155}.section-actions{display:flex;justify-content:flex-end;margin-top:3px}
+.section-heading{display:flex;align-items:center;justify-content:space-between}.save-state{font-size:12px;color:#087f5b;font-weight:500}.save-state.dirty{color:#b45309}
+.toast{position:fixed;top:18px;right:18px;padding:11px 18px;border-radius:8px;font-size:13px;color:#fff;opacity:0;transform:translateY(-5px);transition:.2s;z-index:99}
+.toast.ok{background:#087f5b}.toast.err{background:#dc2626}.toast.show{opacity:1;transform:none}
+@media(max-width:820px){.app-shell{grid-template-columns:1fr}.sidebar{position:static}.service-grid{grid-template-columns:1fr 1fr}.tabs{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:540px){.topbar{padding:0 16px}.brand p{display:none}.app-shell{margin:16px auto;padding:0 12px}.service-grid,.template-grid{grid-template-columns:1fr}.tabs{grid-template-columns:1fr}.panel-header{flex-wrap:wrap}.btn-del{margin-left:0}}
 </style>
 </head>
 <body>
-<h1>&#9881;&#65039; Agents Notify</h1>
+<header class="topbar">
+<img class="logo" src="/assets/galaxrin-agents-notify-logo.png" alt="Galaxrin">
+<div class="brand"><h1>Agents Notify</h1><p>让任务状态及时送达</p></div>
+<div class="status">● 服务正常</div>
+</header>
 <div id="toast" class="toast"></div>
-<div class="card">
-<h2>ntfy 连接</h2>
-<div class="field"><label>主题地址 *</label><input id="f_url" placeholder="AgentsNotify-随机码"></div>
-<div class="field"><label>认证令牌（可选）</label><input id="f_token" placeholder="tk_xxx"></div>
-<div class="row2">
-<div class="field"><label>审批宽限期（秒）</label><input id="f_delay" type="number" min="0" step="0.5" value="10"></div>
-<div class="field"><label>轮询间隔（秒）</label><input id="f_interval" type="number" min="0.5" step="0.5" value="1"></div>
-</div>
-</div>
-<div class="card">
-<h2>通知文案（按 Agent）</h2>
+<div class="app-shell">
+<aside class="card sidebar">
+<h2>Agent</h2>
 <div class="tabs" id="tabs"></div>
-<div class="add-row">
-<input id="newAgent" placeholder="Agent 名称（如 cursor）">
-<button class="btn-add" id="btnAdd">+ 添加 Agent</button>
+<div class="add-row"><input id="newAgent" aria-label="Agent 名称" placeholder="Agent 名称（如 cursor）"><button class="btn-add" id="btnAdd">＋ 添加 Agent</button></div>
+</aside>
+<main class="main">
+<section class="card service">
+<div class="section-heading"><h2 class="section-title">通知服务</h2><span id="saveState" class="save-state">已同步</span></div>
+<div class="service-grid">
+<div class="field"><label for="f_url">ntfy 主题 *</label><input id="f_url" placeholder="AgentsNotify-随机码"></div>
+<div class="field"><label for="f_token">Token（可选）</label><input id="f_token" placeholder="tk_xxx"></div>
+<div class="field"><label for="f_delay">审批宽限期</label><input id="f_delay" type="number" min="0" step="0.5" value="10"></div>
+<div class="field"><label for="f_interval">检查间隔</label><input id="f_interval" type="number" min="0.5" step="0.5" value="1"></div>
 </div>
+</section>
+<section class="card template-card">
 <div id="panels"></div>
+</section>
+</main>
 </div>
 <script>
 var agents={};
-var presets={"codex":{"complete_title":"Codex · 已完成","complete_body":"Codex 任务已结束","approval_title":"Codex · 等待审核","approval_body":"请回到 Codex 处理"},"zcode":{"complete_title":"ZCode · 已完成","complete_body":"ZCode 任务已结束","approval_title":"ZCode · 等待审核","approval_body":"请回到 ZCode 处理"}};
+var presets={"codex":{"display_name":"Codex","title_separator":"·","complete_title":"已完成","complete_body":"Codex 任务已结束","approval_title":"等待审核","approval_body":"请回到 Codex 处理"},"zcode":{"display_name":"ZCode","title_separator":"·","complete_title":"已完成","complete_body":"ZCode 任务已结束","approval_title":"等待审核","approval_body":"请回到 ZCode 处理"}};
 
 function toast(m,ok){var t=document.getElementById("toast");t.textContent=m;t.className="toast "+(ok!==false?"ok":"err")+" show";setTimeout(function(){t.className="toast"},2500)}
 function api(method,url,body){return fetch(url,{method:method,headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined}).then(function(r){return r.json()})}
 
 function fh(key,val){
-  var labels={display_name:"显示名称",complete_title:"完成标题",complete_body:"完成正文",complete_tags:"完成标签",approval_title:"审批标题",approval_body:"审批正文",approval_tags:"审批标签"};
+  var labels={display_name:"Agent 名称",title_separator:"标题分隔符",complete_title:"完成标题",complete_body:"完成正文",complete_tags:"完成标签",approval_title:"审批标题",approval_body:"审批正文",approval_tags:"审批标签"};
   var lb=labels[key]||key;
   return '<div class="field"><label>'+lb+'</label><input data-k="'+key+'" value="'+(val||"").replace(/"/g,"")+'"></div>'}
 
@@ -82,25 +98,25 @@ function render(){
     var n=names[i];var a=agents[n];var m=a.messages||{};
     var dirs=a.dirs||[];
     ph+='<div class="panel'+(i===0?' active':'')+'" data-name="'+n+'">';
-    ph+='<div class="panel-header"><h3>'+n+'</h3>';
-    ph+='<button class="btn-test" data-test="'+n+'" data-type="complete">测试完成</button>';
-    ph+='<button class="btn-test" data-test="'+n+'" data-type="approval">测试审批</button>';
-    ph+='<button class="btn-s" style="padding:5px 12px;font-size:12px;border-radius:7px" data-reset="'+n+'">恢复默认</button>';
+    ph+='<div class="panel-content"><div class="panel-header"><h3>'+n+' 通知模板</h3>';
+    ph+='<button class="btn-s" data-reset="'+n+'">恢复默认</button>';
     ph+='<button class="btn-del" data-del="'+n+'">删除</button></div>';
     if(dirs.length>0){ph+='<div class="dir-box"><b>监听目录：</b>'+dirs.join("<br>")+'</div>'}
     else{ph+='<div class="dir-box">未检测到目录，请确认 Agent 已安装</div>'}
     ph+=fh("display_name",m.display_name||"");
+    ph+=fh("title_separator",m.title_separator===undefined?"·":m.title_separator);
+    ph+='<div class="template-section"><h4>任务完成</h4><div class="template-grid">';
     ph+=fh("complete_title",m.complete_title||"");
     ph+=fh("complete_body",m.complete_body||"");
-    ph+=fh("complete_tags",m.complete_tags||"");
-    ph+='<div style="height:10px"></div>';
+    ph+='</div>'+fh("complete_tags",m.complete_tags||"");
+    ph+='<div class="section-actions"><button class="btn-test" data-test="'+n+'" data-type="complete">发送完成测试</button></div></div>';
+    ph+='<div class="template-section"><h4>等待审批</h4><div class="template-grid">';
     ph+=fh("approval_title",m.approval_title||"");
     ph+=fh("approval_body",m.approval_body||"");
-    ph+=fh("approval_tags",m.approval_tags||"");
-    ph+='</div>'}
+    ph+='</div>'+fh("approval_tags",m.approval_tags||"");
+    ph+='<div class="section-actions"><button class="btn-test" data-test="'+n+'" data-type="approval">发送审批测试</button></div></div></div></div>'}
   pd.innerHTML=ph;
-  bindAll();
-  bindAutoSave()}
+  bindAll()}
 
 function bindAll(){
   document.querySelectorAll(".tab").forEach(function(tab){
@@ -117,35 +133,37 @@ function bindAll(){
       var panel=document.querySelector('.panel[data-name="'+name+'"]');
       if(!panel){toast("未找到面板",false);return}
       var msgs=collect(panel);
-      api("POST","/api/test",{agent:name,messages:msgs,type:ntype}).then(function(r){
-        toast(r.ok?name+" 通知已发送":"失败: "+(r.error||""),r.ok)})})});
-  document.querySelectorAll("[data-reset]").forEach(function(btn){
-    btn.addEventListener("click",function(){
-      var name=this.getAttribute("data-reset");
-      if(!confirm("将 "+name+" 的文案恢复为默认值？"))return;
-      var preset=presets[name]||{};
-      var defaults={display_name:"",complete_title:"",complete_body:"",approval_title:"",approval_body:"",complete_tags:"white_check_mark",approval_tags:"warning"};
-      var msgs={};
-      for(var k in defaults){msgs[k]=preset[k]||defaults[k]}
-      var panel=document.querySelector('.panel[data-name="'+name+'"]');
-      if(!panel)return;
-      panel.querySelectorAll("[data-k]").forEach(function(el){
-        var key=el.getAttribute("data-k");
-        if(msgs[key]!==undefined)el.value=msgs[key]});
-      autoSave();
-      toast(name+" 已恢复默认")})});
+      clearTimeout(saveTimer);save();
+      saveRequest.then(function(){return api("POST","/api/test",{agent:name,messages:msgs,type:ntype})}).then(function(r){
+        toast(r.ok?name+" 通知已发送":"失败: "+(r.error||""),r.ok)}).catch(function(e){toast("请求失败: "+e.message,false)})})});
   document.querySelectorAll("[data-del]").forEach(function(btn){
     btn.addEventListener("click",function(){
       var name=this.getAttribute("data-del");
       if(!confirm("删除 "+name+" 的文案配置？"))return;
-      api("POST","/api/delete",{agent:name}).then(function(r){
-        if(r.ok){toast("已删除 "+name);load()}else toast("失败",false)})})})}
+      clearTimeout(saveTimer);
+      syncAgentsFromPanels();delete agents[name];render();
+      save();
+      saveRequest.then(function(){return api("POST","/api/delete",{agent:name})}).then(function(r){
+        if(r.ok){toast("已删除 "+name);load()}else toast("失败",false)}).catch(function(e){toast("请求失败: "+e.message,false)})})});
+  document.querySelectorAll("[data-reset]").forEach(function(btn){
+    btn.addEventListener("click",function(){
+      var name=this.getAttribute("data-reset");if(!confirm("将 "+name+" 的文案恢复为默认值？"))return;
+      var panel=document.querySelector('.panel[data-name="'+name+'"]');var preset=presets[name]||{};
+      var defaults={display_name:"",title_separator:"·",complete_title:"",complete_body:"",approval_title:"",approval_body:"",complete_tags:"white_check_mark",approval_tags:"warning"};
+      panel.querySelectorAll("[data-k]").forEach(function(el){var key=el.getAttribute("data-k");el.value=preset[key]!==undefined?preset[key]:(defaults[key]||"")});
+      scheduleSave();toast(name+" 已恢复默认")})});
+  document.querySelectorAll(".panel input").forEach(function(el){el.addEventListener("input",scheduleSave)})}
 
 function collect(panel){
   var msgs={};
   panel.querySelectorAll("[data-k]").forEach(function(el){
     msgs[el.getAttribute("data-k")]=el.value});
   return msgs}
+
+function syncAgentsFromPanels(){
+  document.querySelectorAll(".panel").forEach(function(panel){
+    var name=panel.getAttribute("data-name");
+    if(agents[name])agents[name].messages=collect(panel)})}
 
 function load(){
   api("GET","/api/config").then(function(d){
@@ -154,37 +172,38 @@ function load(){
     document.getElementById("f_delay").value=d.env.delay||"10";
     document.getElementById("f_interval").value=d.env.interval||"1";
     agents=d.agents||{};
-    render()})}
+    render();setSaveState("已同步",false)}).catch(function(e){toast("请求失败: "+e.message,false)})}
 
-var _saveTimer=null;
-function autoSave(){
-  clearTimeout(_saveTimer);
-  _saveTimer=setTimeout(function(){
-    var env={url:document.getElementById("f_url").value,token:document.getElementById("f_token").value,sessions:"",delay:document.getElementById("f_delay").value,interval:document.getElementById("f_interval").value};
-    var a={};
-    document.querySelectorAll(".panel").forEach(function(panel){
-      var name=panel.getAttribute("data-name");
-      a[name]={messages:collect(panel)}});
-    api("POST","/api/config",{env:env,agents:a}).then(function(r){
-      if(r.ok){agents=r.agents||agents}
-      else toast("保存失败: "+(r.error||""),false)})},500)}
+function setSaveState(text,dirty){var s=document.getElementById("saveState");s.textContent=text;s.className="save-state"+(dirty?" dirty":"")}
+var saveTimer=null;
+var saveRequest=Promise.resolve();
+function scheduleSave(){clearTimeout(saveTimer);setSaveState("正在更新…",true);saveTimer=setTimeout(save,500)}
 
-function bindAutoSave(){
-  document.querySelectorAll(".card input,.card select").forEach(function(el){
-    el.removeEventListener("input",autoSave);
-    el.addEventListener("input",autoSave)})}
+function save(){
+  var env={url:document.getElementById("f_url").value,token:document.getElementById("f_token").value,sessions:"",delay:document.getElementById("f_delay").value,interval:document.getElementById("f_interval").value};
+  var a={};
+  document.querySelectorAll(".panel").forEach(function(panel){a[panel.getAttribute("data-name")]={messages:collect(panel)}});
+  saveRequest=saveRequest.then(function(){return api("POST","/api/config",{env:env,agents:a})}).then(function(r){
+    if(r.ok){setSaveState("已同步",false)}
+    else{setSaveState("更新失败",true);toast("保存失败: "+(r.error||""),false)}}).catch(function(e){
+      setSaveState("更新失败",true);toast("请求失败: "+e.message,false)});
+  return saveRequest}
 
 document.getElementById("btnAdd").addEventListener("click",function(){
   var name=document.getElementById("newAgent").value.trim().toLowerCase().replace(/[^a-z0-9_-]/g,"");
   if(!name){toast("请输入名称",false);return}
   if(agents[name]){toast("已存在",false);return}
+  syncAgentsFromPanels();
   var preset=presets[name]||{};
   var msgs={};
-  ["display_name","complete_title","complete_body","approval_title","approval_body","complete_tags","approval_tags"].forEach(function(k){msgs[k]=preset[k]||""});
+  ["display_name","title_separator","complete_title","complete_body","approval_title","approval_body","complete_tags","approval_tags"].forEach(function(k){msgs[k]=preset[k]!==undefined?preset[k]:""});
   agents[name]={messages:msgs,dirs:[]};
   document.getElementById("newAgent").value="";
   render();
+  scheduleSave();
   toast("已添加 "+name)});
+
+document.querySelectorAll(".service input").forEach(function(el){el.addEventListener("input",scheduleSave)});
 
 load();
 </script>

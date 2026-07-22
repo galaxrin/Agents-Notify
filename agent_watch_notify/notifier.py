@@ -12,6 +12,7 @@ from agent_watch_notify.events import Notification
 
 DEFAULT_MESSAGES = {
     "display_name": "",
+    "title_separator": "·",
     "complete_title": "任务已完成",
     "complete_body": "Agent 任务已结束",
     "approval_title": "等待审核",
@@ -45,7 +46,9 @@ def load_messages(path: Path, agent_name: str | None = None) -> dict[str, str]:
             continue
         for key in messages:
             value = configured.get(key)
-            if isinstance(value, str) and value.strip():
+            if key == "title_separator" and isinstance(value, str):
+                messages[key] = value.strip()
+            elif isinstance(value, str) and value.strip():
                 messages[key] = value
         break  # first valid file wins
     return messages
@@ -56,8 +59,9 @@ def customize(notification: Notification, messages: dict[str, str]) -> Notificat
     title = messages[f"{prefix}_title"]
     body = messages[f"{prefix}_body"]
     agent = messages.get("display_name") or notification.agent_name
+    separator = messages.get("title_separator", "·").strip()
     if agent and agent.lower() not in title.lower():
-        title = f"{agent} · {title}"
+        title = " ".join(part for part in (agent, separator, title) if part)
     return Notification(notification.key, title, body, agent_name=agent)
 
 

@@ -54,7 +54,7 @@ Windows PowerShell：
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/galaxrin/Agents-Notify/main/scripts/bootstrap.ps1)))
 ```
 
-脚本会从 GitHub 安装最新版、注册开机自启并自动打开 Web 配置，不需要 Git 或克隆仓库。保存配置后页面服务自动退出，后台通知继续运行。
+脚本会从 GitHub 安装最新版、注册开机自启并自动打开 Web 配置，不需要 Git 或克隆仓库。配置保存后立即生效，后台通知继续运行。
 
 ### 手动安装
 
@@ -78,13 +78,20 @@ agent-watch-notify --install
 agent-watch-notify --test
 ```
 
-管理任务：
+重启后台服务：
+
+```bash
+# macOS
+launchctl kickstart -k "gui/$(id -u)/com.agent.watch-notify"
+```
 
 ```powershell
-schtasks /query /tn agent-watch-notify    # 查看状态
-schtasks /run /tn agent-watch-notify      # 手动启动
-schtasks /end /tn agent-watch-notify      # 停止
+# Windows PowerShell
+schtasks /end /tn agent-watch-notify
+schtasks /run /tn agent-watch-notify
 ```
+
+macOS 的 `kickstart -k` 会终止当前进程并立即由 LaunchAgent 重新启动；Windows 需要先停止再启动计划任务。
 
 ## Web 配置页面
 
@@ -94,7 +101,7 @@ schtasks /end /tn agent-watch-notify      # 停止
 agent-watch-notify --config
 ```
 
-浏览器会自动打开 `http://127.0.0.1:9876`，可以配置：
+该命令会启动本地 Web 服务，并自动打开 `http://127.0.0.1:9876`。终端需保持运行；配置完成后按 `Ctrl+C` 关闭 Web 服务。页面可以配置：
 
 - ntfy 连接信息（地址、令牌、监听目录）
 - 通知文案（完成/审批的标题、正文）
@@ -102,7 +109,7 @@ agent-watch-notify --config
 - 审批宽限期和轮询间隔
 - 测试通知、恢复默认
 
-保存后立即生效，无需重启服务，配置页面服务会自动退出。仅本机可访问，不暴露到局域网。
+保存后立即生效，无需重启后台通知服务。Web 服务仅本机可访问，不暴露到局域网。
 
 ## 测试通知
 
@@ -133,10 +140,12 @@ open -e "$HOME/.config/agent-watch-notify/messages.json"
 agent-watch-notify --config
 ```
 
-配置包含八项：
+配置包含以下项：
 
 ```json
 {
+  "display_name": "Agent",
+  "title_separator": "·",
   "complete_title": "任务已完成",
   "complete_body": "Agent 任务已结束",
   "approval_title": "等待审核",
@@ -150,6 +159,8 @@ agent-watch-notify --config
 
 | 字段 | 说明 | 可选值 |
 |------|------|--------|
+| `display_name` | Agent 名称 | 任意文本，例如 `Codex` |
+| `title_separator` | Agent 名称与标题的分隔符 | 任意文本；留空则不显示 |
 | `complete_priority` | 完成通知优先级 | `min` `low` `default` `high` `urgent` |
 | `complete_tags` | 完成通知标签 | ntfy emoji 标签名 |
 | `approval_priority` | 审批通知优先级 | 同上 |

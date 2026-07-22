@@ -14,6 +14,17 @@ from agent_watch_notify.config_server import _Handler
 
 
 class InstallerTest(unittest.TestCase):
+    def test_windows_wrapper_supports_non_ascii_user_profile(self):
+        with TemporaryDirectory() as directory, \
+                patch.object(installer.sys, "platform", "win32"), \
+                patch.object(installer, "_bin_dir", return_value=Path(directory)), \
+                patch.object(installer, "_config_dir", return_value=Path("C:/Users/张三/.config/agent-watch-notify")), \
+                patch.object(installer, "_state_dir", return_value=Path("C:/Users/张三/.local/state/agent-watch-notify")):
+            installer._write_wrapper()
+            content = (Path(directory) / "agent-watch-notify.cmd").read_text()
+            self.assertIn("%USERPROFILE%", content)
+            content.encode("ascii")
+
     def test_installer_creates_messages_once_and_preserves_custom_copy(self):
         with TemporaryDirectory() as directory, \
                 patch.object(installer, "_config_dir", return_value=Path(directory)):
@@ -32,6 +43,11 @@ class InstallerTest(unittest.TestCase):
             installer._install_message_files()
             self.assertTrue((Path(directory) / "messages.codex.json").exists())
             self.assertTrue((Path(directory) / "messages.zcode.json").exists())
+            codex = json.loads((Path(directory) / "messages.codex.json").read_text())
+            self.assertEqual(codex["display_name"], "Codex")
+            self.assertEqual(codex["title_separator"], "·")
+            self.assertEqual(codex["complete_title"], "已完成")
+            self.assertEqual(codex["approval_title"], "等待审核")
 
     def test_write_env_keeps_legacy_names_and_private_permissions(self):
         with TemporaryDirectory() as directory, \
@@ -76,7 +92,160 @@ class BootstrapTest(unittest.TestCase):
 
 
 class ConfigServerTest(unittest.TestCase):
-    def test_server_stops_after_config_is_saved(self):
+    def test_write_env_replaces_invalid_numbers_with_safe_defaults(self):
+        with TemporaryDirectory() as directory:
+            handler = object.__new__(_Handler)
+            handler.config_dir = Path(directory)
+
+            handler._write_env({
+                "url": "topic",
+                "token": "",
+                "delay": "nan",
+                "interval": "-1",
+            })
+
+            env = (Path(directory) / "env").read_text()
+            self.assertIn("AGENT_WATCH_APPROVAL_DELAY=10\n", env)
+            self.assertIn("AGENT_WATCH_POLL_INTERVAL=1\n", env)
+
+    def test_config_post_rejects_non_object_sections(self):
+        handler = object.__new__(_Handler)
+        handler.path = "/api/config"
+        body = b'{"env":[],"agents":[]}'
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.rfile = io.BytesIO(body)
+        responses = []
+        handler._json_response = lambda data, status=200: responses.append((data, status))
+
+        handler.do_POST()
+
+        self.assertEqual(responses, [({"ok": False, "error": "invalid config"}, 400)])
+
+    def test_post_rejects_non_object_request(self):
+        handler = object.__new__(_Handler)
+        handler.path = "/api/config"
+        body = b'[]'
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.rfile = io.BytesIO(body)
+        responses = []
+        handler._json_response = lambda data, status=200: responses.append((data, status))
+
+        handler.do_POST()
+
+        self.assertEqual(responses, [({"ok": False, "error": "invalid request"}, 400)])
+
+    def test_header_logo_is_served_as_png(self):
+        root = Path(__file__).resolve().parents[1] / "agent_watch_notify"
+        _Handler.assets_dir = root / "assets"
+        handler = object.__new__(_Handler)
+        handler.path = "/assets/galaxrin-agents-notify-logo.png"
+        handler.wfile = io.BytesIO()
+        headers = {}
+        handler.send_response = lambda status: headers.update(status=status)
+        handler.send_header = lambda key, value: headers.update({key: value})
+        handler.end_headers = lambda: None
+        handler.send_error = lambda status: headers.update(status=status)
+
+        handler.do_GET()
+
+        self.assertEqual(headers["status"], 200)
+        self.assertEqual(headers["Content-Type"], "image/png")
+        self.assertTrue(handler.wfile.getvalue().startswith(b"\x89PNG"))
+
+    def test_agent_discovery_scans_session_directories_once(self):
+        with TemporaryDirectory() as directory:
+            config = Path(directory)
+            (config / "messages.codex.json").write_text("{}")
+            (config / "messages.zcode.json").write_text("{}")
+            _Handler.config_dir = config
+            handler = object.__new__(_Handler)
+            paths = [Path.home() / ".codex" / "sessions",
+                     Path.home() / ".zcode" / "cli" / "agents"]
+            with patch.object(handler, "_all_session_dirs", return_value=paths) as scan:
+                agents = handler._discover_agents()
+            self.assertEqual(scan.call_count, 1)
+            self.assertEqual(agents["codex"]["dirs"], [str(paths[0])])
+            self.assertEqual(agents["zcode"]["dirs"], [str(paths[1])])
+
+    def test_web_keeps_session_setting_empty_for_future_discovery(self):
+        with TemporaryDirectory() as directory, TemporaryDirectory() as home:
+            (Path(home) / ".codex" / "sessions").mkdir(parents=True)
+            _Handler.config_dir = Path(directory)
+            handler = object.__new__(_Handler)
+            with patch("agent_watch_notify.config_server.Path.home", return_value=Path(home)):
+                handler._write_env({"url": "topic", "token": "", "delay": "10", "interval": "1"})
+            env = (Path(directory) / "env").read_text()
+            self.assertIn("AGENT_WATCH_SESSIONS_DIR=\n", env)
+
+    def test_deleted_discovered_agent_stays_hidden(self):
+        with TemporaryDirectory() as directory, TemporaryDirectory() as home:
+            (Path(home) / ".codex" / "sessions").mkdir(parents=True)
+            _Handler.config_dir = Path(directory)
+            handler = object.__new__(_Handler)
+            handler.path = "/api/delete"
+            body = b'{"agent":"codex"}'
+            handler.headers = {"Content-Length": str(len(body))}
+            handler.rfile = io.BytesIO(body)
+            handler._json_response = lambda *_args, **_kwargs: None
+            with patch("agent_watch_notify.config_server.Path.home", return_value=Path(home)):
+                handler.do_POST()
+                self.assertNotIn("codex", handler._discover_agents())
+
+    def test_missing_topic_is_generated_once_and_persisted(self):
+        with TemporaryDirectory() as directory:
+            _Handler.config_dir = Path(directory)
+            handler = object.__new__(_Handler)
+            first = handler._read_env()["url"]
+            second = handler._read_env()["url"]
+            self.assertRegex(first, r"^AgentsNotify-[0-9a-f]{32}$")
+            self.assertEqual(second, first)
+
+    def test_config_page_auto_saves_and_keeps_reset_in_agent_panel(self):
+        html = (Path(__file__).resolve().parents[1] / "agent_watch_notify" / "config.html").read_text()
+        self.assertIn('class="app-shell"', html)
+        self.assertNotIn('id="btnSave"', html)
+        self.assertIn("scheduleSave", html)
+        self.assertIn('data-reset="', html)
+        self.assertIn('display_name:"Agent 名称"', html)
+        self.assertIn('title_separator:"标题分隔符"', html)
+        self.assertIn('"title_separator":"·"', html)
+
+    def test_config_page_preserves_edits_when_adding_and_serializes_delete(self):
+        html = (Path(__file__).resolve().parents[1] / "agent_watch_notify" / "config.html").read_text()
+        add = html.index('agents[name]={messages:msgs,dirs:[]}')
+        self.assertGreater(html.rfind("syncAgentsFromPanels()", 0, add), 0)
+        self.assertIn(
+            'saveRequest.then(function(){return api("POST","/api/delete"',
+            html,
+        )
+
+    def test_config_page_serializes_saves_and_reports_network_failures(self):
+        html = (Path(__file__).resolve().parents[1] / "agent_watch_notify" / "config.html").read_text()
+        self.assertIn('saveRequest=saveRequest.then(function(){return api("POST","/api/config"', html)
+        self.assertIn('setSaveState("更新失败",true)', html)
+        self.assertIn('.catch(function(e){toast("请求失败: "+e.message,false)})', html)
+        self.assertIn('saveRequest.then(function(){return api("POST","/api/test"', html)
+
+    def test_empty_title_separator_is_persisted(self):
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "messages.codex.json"
+            handler = object.__new__(_Handler)
+            handler.config_dir = Path(directory)
+            handler._write_messages_file(path, {"title_separator": ""})
+            self.assertEqual(json.loads(path.read_text())["title_separator"], "")
+
+    def test_discovers_agents_from_session_directories(self):
+        with TemporaryDirectory() as directory, TemporaryDirectory() as home:
+            (Path(home) / ".claude" / "sessions").mkdir(parents=True)
+            (Path(home) / ".kimi-code" / "sessions").mkdir(parents=True)
+            _Handler.config_dir = Path(directory)
+            handler = object.__new__(_Handler)
+            with patch("agent_watch_notify.config_server.Path.home", return_value=Path(home)):
+                agents = handler._discover_agents()
+            self.assertEqual(set(agents), {"claude", "kimi-code"})
+            self.assertEqual(agents["claude"]["dirs"], [str(Path(home) / ".claude" / "sessions")])
+
+    def test_server_keeps_running_after_config_is_saved(self):
         with TemporaryDirectory() as directory:
             _Handler.config_dir = Path(directory)
             stopped = threading.Event()
@@ -93,7 +262,7 @@ class ConfigServerTest(unittest.TestCase):
             handler.server = Server()
             handler._json_response = lambda *_args, **_kwargs: None
             handler.do_POST()
-            self.assertTrue(stopped.wait(0.2))
+            self.assertFalse(stopped.wait(0.05))
 
 
 if __name__ == "__main__":
