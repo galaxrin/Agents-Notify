@@ -40,6 +40,24 @@ AI Agent（Codex / ZCode / …）
 
 前提：Python 3.10+ 已安装并加入 PATH。
 
+### 一键安装
+
+macOS：
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/galaxrin/Agents-Notify/main/scripts/bootstrap.sh)"
+```
+
+Windows PowerShell：
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/galaxrin/Agents-Notify/main/scripts/bootstrap.ps1)))
+```
+
+脚本会从 GitHub 安装最新版，然后进入 ntfy 配置并注册开机自启，不需要 Git 或克隆仓库。
+
+### 手动安装
+
 ```bash
 git clone https://github.com/galaxrin/Agents-Notify.git
 cd Agents-Notify
