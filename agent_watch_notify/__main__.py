@@ -32,8 +32,6 @@ def _parse_session_dirs(raw: str | None, ignored: set[str] | None = None) -> lis
             stripped = part.strip()
             if stripped:
                 found.add(Path(stripped).expanduser())
-    if not found:
-        found.add(Path.home() / ".codex/sessions")
     return [path for path in sorted(found) if guess_agent_name(path) not in (ignored or set())]
 
 
@@ -54,6 +52,50 @@ def _send_factory(config_dir: Path, messages_path: Path | None):
         return publish(notification, topic_url, token, messages=messages)
 
     return send
+
+
+def run_listener(config_dir: Path, listener_lock=None) -> bool:
+    messages_path = config_dir / "messages.json"
+
+    def current_session_dirs():
+        current = read_env_file(config_dir / "env")
+        sessions_raw = current.get("AGENT_WATCH_SESSIONS_DIR") or current.get("CODEX_SESSIONS_DIR") or ""
+        ignored = {name.strip() for name in current.get("AGENT_WATCH_IGNORED_AGENTS", "").split(",") if name.strip()}
+        return _parse_session_dirs(sessions_raw, ignored)
+
+    sessions_dirs = current_session_dirs()
+    state_dir = Path.home() / ".local" / "state" / _STATE_DIR_NAME
+    seen = SeenKeys(state_dir / "seen.json")
+
+    def current_settings():
+        current = read_env_file(config_dir / "env")
+        try:
+            approval = float(current.get("AGENT_WATCH_APPROVAL_DELAY")
+                             or current.get("CODEX_WATCH_APPROVAL_DELAY") or "10")
+        except ValueError:
+            approval = 10.0
+        try:
+            interval = float(current.get("AGENT_WATCH_POLL_INTERVAL")
+                             or current.get("CODEX_WATCH_POLL_INTERVAL") or "1")
+        except ValueError:
+            interval = 1.0
+        return approval, max(interval, 0.5)
+
+    approval_delay, poll_interval = current_settings()
+    if listener_lock is None:
+        from agent_watch_notify.instance_lock import WatchLock
+        listener_lock = WatchLock(state_dir / "watch.lock")
+        if not listener_lock.acquire():
+            print("监听服务已在运行")
+            return False
+    send = _send_factory(config_dir, messages_path)
+    try:
+        watch(sessions_dirs, seen, send, interval=poll_interval,
+              messages_path=messages_path, approval_delay=approval_delay,
+              discover=current_session_dirs, settings=current_settings)
+    finally:
+        listener_lock.release()
+    return True
 
 
 def main() -> int:
@@ -112,28 +154,7 @@ def main() -> int:
             messages,
         )
         return 0 if publish(notification, topic_url, token, messages=messages) else 1
-    def current_session_dirs():
-        current = read_env_file(config_dir / "env")
-        sessions_raw = current.get("AGENT_WATCH_SESSIONS_DIR") or current.get("CODEX_SESSIONS_DIR") or ""
-        ignored = {name.strip() for name in current.get("AGENT_WATCH_IGNORED_AGENTS", "").split(",") if name.strip()}
-        return _parse_session_dirs(sessions_raw, ignored)
-
-    sessions_dirs = current_session_dirs()
-    seen = SeenKeys(Path.home() / ".local" / "state" / _STATE_DIR_NAME / "seen.json")
-    try:
-        approval_delay = float(env_file.get("AGENT_WATCH_APPROVAL_DELAY") or env_file.get("CODEX_WATCH_APPROVAL_DELAY") or "10")
-    except ValueError:
-        approval_delay = 10.0
-    try:
-        poll_interval = float(env_file.get("AGENT_WATCH_POLL_INTERVAL") or env_file.get("CODEX_WATCH_POLL_INTERVAL") or "1")
-    except ValueError:
-        poll_interval = 1.0
-    if poll_interval < 0.5:
-        poll_interval = 0.5
-    send = _send_factory(config_dir, messages_path)
-    watch(sessions_dirs, seen, send, interval=poll_interval,
-          messages_path=messages_path, approval_delay=approval_delay,
-          discover=current_session_dirs)
+    run_listener(config_dir)
     return 0
 
 

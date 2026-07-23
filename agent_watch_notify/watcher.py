@@ -66,7 +66,7 @@ class SeenKeys:
         self.path = path
         self.limit = limit
         try:
-            values = json.loads(path.read_text())
+            values = json.loads(path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             values = []
         if not isinstance(values, list):
@@ -88,7 +88,7 @@ class SeenKeys:
         temporary = self.path.with_name(f".{self.path.name}.tmp")
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            temporary.write_text(json.dumps(list(self.values)))
+            temporary.write_text(json.dumps(list(self.values)), encoding="utf-8")
             os.chmod(temporary, _SEEN_PERMISSIONS)
             os.replace(temporary, self.path)
         except OSError as error:
@@ -266,7 +266,8 @@ def watch(sessions_dirs: list[Path], seen: SeenKeys,
           send: Callable[[Notification], bool],
           interval: float = 1.0, messages_path: Path | None = None,
           approval_delay: float = 10.0,
-          discover: Callable[[], list[Path]] | None = None) -> None:
+          discover: Callable[[], list[Path]] | None = None,
+          settings: Callable[[], tuple[float, float]] | None = None) -> None:
     states = {}
     # Map each directory to its agent name for per-agent message loading
     dir_agents: dict[Path, str | None] = {}
@@ -285,6 +286,9 @@ def watch(sessions_dirs: list[Path], seen: SeenKeys,
                               approval_delay=approval_delay, pending=shared_pending,
                               review=review)
     while True:
+        if settings is not None:
+            approval_delay, interval = settings()
+            flush_ctx.approval_delay = approval_delay
         if discover is not None:
             current_dirs = set(discover())
             for sessions_dir in current_dirs - set(dir_agents):

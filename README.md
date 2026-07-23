@@ -22,13 +22,24 @@
 
 ## 一键安装
 
-### macOS
+### 桌面程序
+
+从 GitHub Actions 下载对应平台的 `Agents-Notify.exe` 或
+`Agents-Notify-macOS-arm64.dmg`。桌面程序会在应用窗口内显示配置页；关闭窗口后
+继续在系统托盘或菜单栏运行，可从菜单重新打开配置或彻底退出。
+
+桌面程序与下方 CLI 安装方式共用配置和通知记录。同一台电脑同时运行两者时，
+只有一个进程负责监听，避免重复发送通知。
+
+### CLI
+
+#### macOS
 
 ```bash
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/galaxrin/Agents-Notify/main/scripts/bootstrap.sh)"
 ```
 
-### Windows PowerShell
+#### Windows PowerShell
 
 ```powershell
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/galaxrin/Agents-Notify/main/scripts/bootstrap.ps1)))

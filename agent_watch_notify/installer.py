@@ -9,7 +9,9 @@ import sys
 from pathlib import Path
 
 from agent_watch_notify._config import read_env_file, write_env_file
+from agent_watch_notify.events import guess_agent_name
 from agent_watch_notify.notifier import DEFAULT_MESSAGES
+from agent_watch_notify.watcher import discover_session_dirs
 
 _LABEL = "com.agent.watch-notify"
 _TASK_NAME = "agent-watch-notify"
@@ -65,11 +67,18 @@ def _install_message_files() -> None:
     if scripts is None:
         # pip install: write built-in defaults
         if not dest.exists():
-            dest.write_text(json.dumps(DEFAULT_MESSAGES, ensure_ascii=False, indent=2) + "\n")
-        for name, display_name in (("codex", "Codex"), ("zcode", "ZCode")):
+            dest.write_text(
+                json.dumps(DEFAULT_MESSAGES, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        for path in discover_session_dirs():
+            name = guess_agent_name(path)
+            if not name:
+                continue
             agent_dest = _config_dir() / f"messages.{name}.json"
             if agent_dest.exists():
                 continue
+            display_name = name[0].upper() + name[1:]
             messages = DEFAULT_MESSAGES | {
                 "display_name": display_name,
                 "title_separator": "·",
@@ -78,7 +87,10 @@ def _install_message_files() -> None:
                 "approval_title": "等待审核",
                 "approval_body": f"请回到 {display_name} 处理",
             }
-            agent_dest.write_text(json.dumps(messages, ensure_ascii=False, indent=2) + "\n")
+            agent_dest.write_text(
+                json.dumps(messages, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
         return
     # Repo checkout: copy all message files
     if not dest.exists():
@@ -265,5 +277,5 @@ def _write_wrapper() -> None:
             f'set -a && . "{env_file}" && set +a\n'
             'exec python3 -m agent_watch_notify "$@"\n'
         )
-        wrapper.write_text(content)
+        wrapper.write_text(content, encoding="utf-8")
         os.chmod(wrapper, 0o755)

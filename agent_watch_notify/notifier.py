@@ -35,7 +35,7 @@ def load_messages(path: Path, agent_name: str | None = None) -> dict[str, str]:
     paths_to_try.append(path)
     for p in paths_to_try:
         try:
-            configured = json.loads(p.read_text())
+            configured = json.loads(p.read_text(encoding="utf-8"))
         except FileNotFoundError:
             continue
         except (json.JSONDecodeError, OSError) as error:

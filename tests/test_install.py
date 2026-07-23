@@ -39,15 +39,21 @@ class InstallerTest(unittest.TestCase):
     def test_packaged_installer_creates_default_agent_messages(self):
         with TemporaryDirectory() as directory, \
                 patch.object(installer, "_config_dir", return_value=Path(directory)), \
-                patch.object(installer, "_find_scripts_dir", return_value=None):
+                patch.object(installer, "_find_scripts_dir", return_value=None), \
+                patch.object(installer, "discover_session_dirs", return_value=[
+                    Path.home() / ".claude" / "sessions",
+                    Path.home() / ".kimi-code" / "sessions",
+                ]):
             installer._install_message_files()
-            self.assertTrue((Path(directory) / "messages.codex.json").exists())
-            self.assertTrue((Path(directory) / "messages.zcode.json").exists())
-            codex = json.loads((Path(directory) / "messages.codex.json").read_text())
-            self.assertEqual(codex["display_name"], "Codex")
-            self.assertEqual(codex["title_separator"], "·")
-            self.assertEqual(codex["complete_title"], "已完成")
-            self.assertEqual(codex["approval_title"], "等待审核")
+            claude = json.loads(
+                (Path(directory) / "messages.claude.json").read_text()
+            )
+            kimi = json.loads(
+                (Path(directory) / "messages.kimi-code.json").read_text()
+            )
+            self.assertEqual(claude["display_name"], "Claude")
+            self.assertEqual(kimi["display_name"], "Kimi-code")
+            self.assertFalse((Path(directory) / "messages.codex.json").exists())
 
     def test_write_env_keeps_legacy_names_and_private_permissions(self):
         with TemporaryDirectory() as directory, \
@@ -92,6 +98,27 @@ class BootstrapTest(unittest.TestCase):
 
 
 class ConfigServerTest(unittest.TestCase):
+    def test_create_server_does_not_open_browser(self):
+        from agent_watch_notify import config_server
+
+        with TemporaryDirectory() as directory, \
+                patch.object(config_server, "HTTPServer") as http_server, \
+                patch.object(config_server.webbrowser, "open") as browser:
+            http_server.return_value.server_port = 4321
+            server, url = config_server.create_server(Path(directory), port=0)
+            self.assertEqual(url, "http://127.0.0.1:4321")
+            self.assertIs(server, http_server.return_value)
+            browser.assert_not_called()
+
+    def test_message_files_are_read_as_utf8(self):
+        handler = object.__new__(_Handler)
+        with patch.object(Path, "read_text",
+                          return_value='{"complete_body":"宝宝任务已结束"}') as read:
+            messages = handler._read_messages_file(Path("messages.codex.json"))
+
+        self.assertEqual(messages["complete_body"], "宝宝任务已结束")
+        read.assert_called_once_with(encoding="utf-8")
+
     def test_write_env_replaces_invalid_numbers_with_safe_defaults(self):
         with TemporaryDirectory() as directory:
             handler = object.__new__(_Handler)
@@ -208,7 +235,10 @@ class ConfigServerTest(unittest.TestCase):
         self.assertIn('data-reset="', html)
         self.assertIn('display_name:"Agent 名称"', html)
         self.assertIn('title_separator:"标题分隔符"', html)
-        self.assertIn('"title_separator":"·"', html)
+        self.assertIn("function makePreset(name)", html)
+        self.assertNotIn("var presets=", html)
+        self.assertNotIn('"codex":{', html)
+        self.assertNotIn('"zcode":{', html)
 
     def test_config_page_preserves_edits_when_adding_and_serializes_delete(self):
         html = (Path(__file__).resolve().parents[1] / "agent_watch_notify" / "config.html").read_text()

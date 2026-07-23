@@ -1,0 +1,36 @@
+name: Build desktop apps
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  windows:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e . -r requirements-build.txt
+      - run: ./scripts/build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Agents-Notify-Windows-x64
+          path: dist/Agents-Notify.exe
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -e . -r requirements-build.txt
+      - run: ./scripts/build_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Agents-Notify-macOS-arm64
+          path: dist/Agents-Notify-macOS-arm64.dmg

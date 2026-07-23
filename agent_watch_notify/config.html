@@ -75,7 +75,7 @@ button{padding:9px 15px;border:1px solid transparent;border-radius:8px;font-size
 </div>
 <script>
 var agents={};
-var presets={"codex":{"display_name":"Codex","title_separator":"·","complete_title":"已完成","complete_body":"Codex 任务已结束","approval_title":"等待审核","approval_body":"请回到 Codex 处理"},"zcode":{"display_name":"ZCode","title_separator":"·","complete_title":"已完成","complete_body":"ZCode 任务已结束","approval_title":"等待审核","approval_body":"请回到 ZCode 处理"}};
+function makePreset(name){var dn=name.charAt(0).toUpperCase()+name.slice(1);return{display_name:dn,title_separator:"·",complete_title:"已完成",complete_body:dn+" 任务已结束",approval_title:"等待审核",approval_body:"请回到 "+dn+" 处理"}}
 
 function toast(m,ok){var t=document.getElementById("toast");t.textContent=m;t.className="toast "+(ok!==false?"ok":"err")+" show";setTimeout(function(){t.className="toast"},2500)}
 function api(method,url,body){return fetch(url,{method:method,headers:{"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined}).then(function(r){return r.json()})}
@@ -148,7 +148,7 @@ function bindAll(){
   document.querySelectorAll("[data-reset]").forEach(function(btn){
     btn.addEventListener("click",function(){
       var name=this.getAttribute("data-reset");if(!confirm("将 "+name+" 的文案恢复为默认值？"))return;
-      var panel=document.querySelector('.panel[data-name="'+name+'"]');var preset=presets[name]||{};
+      var panel=document.querySelector('.panel[data-name="'+name+'"]');var preset=makePreset(name);
       var defaults={display_name:"",title_separator:"·",complete_title:"",complete_body:"",approval_title:"",approval_body:"",complete_tags:"white_check_mark",approval_tags:"warning"};
       panel.querySelectorAll("[data-k]").forEach(function(el){var key=el.getAttribute("data-k");el.value=preset[key]!==undefined?preset[key]:(defaults[key]||"")});
       scheduleSave();toast(name+" 已恢复默认")})});
@@ -194,7 +194,7 @@ document.getElementById("btnAdd").addEventListener("click",function(){
   if(!name){toast("请输入名称",false);return}
   if(agents[name]){toast("已存在",false);return}
   syncAgentsFromPanels();
-  var preset=presets[name]||{};
+  var preset=makePreset(name);
   var msgs={};
   ["display_name","title_separator","complete_title","complete_body","approval_title","approval_body","complete_tags","approval_tags"].forEach(function(k){msgs[k]=preset[k]!==undefined?preset[k]:""});
   agents[name]={messages:msgs,dirs:[]};

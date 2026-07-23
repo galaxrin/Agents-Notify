@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.error import URLError
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 import agent_watch_notify.watcher as watcher_module
 from agent_watch_notify.__main__ import _parse_session_dirs, main
@@ -53,6 +53,11 @@ class EventsTest(unittest.TestCase):
         new = Path.home() / ".new-agent" / "sessions"
         with patch("agent_watch_notify.__main__._discover_session_dirs", return_value=[new]):
             self.assertEqual(_parse_session_dirs(str(old)), sorted([old, new]))
+
+    def test_empty_discovery_does_not_invent_codex_directory(self):
+        with patch("agent_watch_notify.__main__._discover_session_dirs",
+                   return_value=[]):
+            self.assertEqual(_parse_session_dirs(""), [])
 
     def test_ignored_agent_is_removed_from_auto_discovery(self):
         codex = Path.home() / ".codex" / "sessions"
@@ -874,6 +879,17 @@ class EventsTest(unittest.TestCase):
                           interval=0, discover=discover)
             self.assertEqual([item.key for item in sent], ["complete:late-turn"])
 
+    def test_watch_reloads_runtime_timing(self):
+        settings = Mock(side_effect=[(10.0, 1.0), (2.0, 0.5)])
+
+        with patch("agent_watch_notify.watcher.time.sleep",
+                   side_effect=[None, StopIteration]) as sleep:
+            with self.assertRaises(StopIteration):
+                watch([], SeenKeys(Path("/tmp/unused-seen.json")), lambda item: True,
+                      settings=settings)
+
+        self.assertEqual(sleep.call_args_list, [call(1.0), call(0.5)])
+
     def test_main_test_mode_returns_publish_status(self):
         with TemporaryDirectory() as directory:
             for published, expected in ((True, 0), (False, 1)):
@@ -905,6 +921,30 @@ class EventsTest(unittest.TestCase):
             self.assertEqual(main(), 0)
         do_install.assert_called_once_with("topic", "token")
         run_server.assert_called_once_with(Path(directory) / ".config" / "agent-watch-notify")
+
+    def test_watch_lock_allows_only_one_listener(self):
+        from agent_watch_notify.instance_lock import WatchLock
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "watch.lock"
+            first = WatchLock(path)
+            second = WatchLock(path)
+
+            self.assertTrue(first.acquire())
+            self.assertFalse(second.acquire())
+            first.release()
+            self.assertTrue(second.acquire())
+            second.release()
+
+    def test_main_exits_when_another_listener_holds_the_lock(self):
+        with TemporaryDirectory() as directory, \
+                patch.dict(os.environ, {"AGENT_WATCH_NTFY_URL": "topic"}, clear=True), \
+                patch("sys.argv", ["agent-watch-notify"]), \
+                patch("agent_watch_notify.__main__.Path.home", return_value=Path(directory)), \
+                patch("agent_watch_notify.instance_lock.WatchLock.acquire", return_value=False), \
+                patch("agent_watch_notify.__main__.watch") as watch_mock:
+            self.assertEqual(main(), 0)
+        watch_mock.assert_not_called()
 
     def test_main_backward_compat_env_vars(self):
         with TemporaryDirectory() as directory:

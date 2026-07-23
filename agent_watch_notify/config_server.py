@@ -13,6 +13,7 @@ from pathlib import Path
 from agent_watch_notify._config import read_env_file, write_env_file
 from agent_watch_notify.events import guess_agent_name
 from agent_watch_notify.notifier import DEFAULT_MESSAGES
+from agent_watch_notify.resources import resource_path
 from agent_watch_notify.watcher import discover_session_dirs
 
 _ENV_PATHS = {
@@ -79,7 +80,7 @@ class _Handler(BaseHTTPRequestHandler):
     def _read_messages_file(self, path):
         result = DEFAULT_MESSAGES.copy()
         try:
-            configured = json.loads(path.read_text())
+            configured = json.loads(path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return result
         if isinstance(configured, dict):
@@ -100,7 +101,10 @@ class _Handler(BaseHTTPRequestHandler):
                 cleaned[key] = value.strip()
             elif isinstance(value, str) and value.strip():
                 cleaned[key] = value
-        path.write_text(json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n")
+        path.write_text(
+            json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
 
     def _read_env(self):
         result = _DEFAULTS.copy()
@@ -227,12 +231,17 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
 
-def run_server(config_dir, host="127.0.0.1", port=9876):
+def create_server(config_dir, host="127.0.0.1", port=9876):
     _Handler.config_dir = config_dir
-    _Handler.html_path = Path(__file__).parent / "config.html"
-    _Handler.assets_dir = Path(__file__).parent / "assets"
+    _Handler.html_path = resource_path("config.html")
+    _Handler.assets_dir = resource_path("assets")
     server = HTTPServer((host, port), _Handler)
-    url = "http://" + host + ":" + str(port)
+    url = "http://" + host + ":" + str(server.server_port)
+    return server, url
+
+
+def run_server(config_dir, host="127.0.0.1", port=9876):
+    server, url = create_server(config_dir, host, port)
     print("配置页面: " + url)
     print("按 Ctrl+C 停止")
     webbrowser.open(url)
