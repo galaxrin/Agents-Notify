@@ -432,6 +432,15 @@ class EventsTest(unittest.TestCase):
             raise URLError("offline")
         self.assertFalse(publish(Notification("k", "t", "b"), "https://example.invalid/topic", None, offline))
 
+    def test_publish_reports_failure_reason(self):
+        def offline(*_args, **_kwargs):
+            raise URLError("Windows network unreachable")
+        errors = []
+        self.assertFalse(publish(
+            Notification("k", "t", "b"), "https://example.invalid/topic",
+            None, offline, errors=errors))
+        self.assertEqual(errors, ["<urlopen error Windows network unreachable>"])
+
     def test_publish_rejects_malformed_url(self):
         self.assertFalse(publish(Notification("k", "t", "b"), "http://[", None))
 

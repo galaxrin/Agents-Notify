@@ -67,7 +67,8 @@ def customize(notification: Notification, messages: dict[str, str]) -> Notificat
 
 def publish(notification: Notification, topic_url: str, token: str | None,
             opener: Callable = urlopen,
-            messages: dict[str, str] | None = None) -> bool:
+            messages: dict[str, str] | None = None,
+            errors: list[str] | None = None) -> bool:
     headers = {"Title": notification.title.encode("utf-8").decode("latin-1")}
     if token:
         headers["Authorization"] = f"Bearer {token}"
@@ -89,7 +90,11 @@ def publish(notification: Notification, topic_url: str, token: str | None,
             if 200 <= response.status < 300:
                 return True
             logging.warning("ntfy publish failed: HTTP status %s", response.status)
+            if errors is not None:
+                errors.append(f"HTTP status {response.status}")
             return False
     except (URLError, OSError, ValueError) as error:
         logging.warning("ntfy publish failed: %s", error)
+        if errors is not None:
+            errors.append(str(error))
         return False

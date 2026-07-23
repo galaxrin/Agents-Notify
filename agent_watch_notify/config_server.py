@@ -205,8 +205,9 @@ class _Handler(BaseHTTPRequestHandler):
                 messages,
             )
             try:
-                success = publish(notification, url, token, messages=messages)
-                self._json_response({"ok": success, "error": "" if success else "发送失败"})
+                errors = []
+                success = publish(notification, url, token, messages=messages, errors=errors)
+                self._json_response({"ok": success, "error": "" if success else (errors[0] if errors else "发送失败")})
             except Exception as e:
                 self._json_response({"ok": False, "error": str(e)})
         elif self.path == "/api/delete":
